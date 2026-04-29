@@ -1,0 +1,42 @@
+module.exports = {
+  rules: {
+    "type-enum": [
+      2,
+      "always",
+      [
+        "feat",
+        "fix",
+        "perf",
+        "security",
+        "chore",
+        "docs",
+        "test",
+        "refactor",
+        "ci",
+        "revert",
+      ],
+    ],
+    "scope-enum": [
+      2,
+      "always",
+      [
+        "wazuh",
+        "rabbitmq",
+        "middleware",
+        "slm",
+        "llm",
+        "rag",
+        "soar",
+        "monitoring",
+        "vault",
+        "docker",
+        "ci",
+        "docs",
+        "security",
+        "github-actions",
+      ],
+    ],
+    "header-max-length": [2, "always", 100],
+    "subject-full-stop": [2, "never", "."],
+  },
+};

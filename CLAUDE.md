@@ -1,0 +1,147 @@
+# AEGIS — Copilot Context File
+
+> Read this file at the start of every session. Do not modify it without a deliberate architectural decision.
+
+---
+
+## Project Summary
+
+AEGIS is a sovereign, 100% open-source, on-premise SOC orchestrator designed for industrial SMEs
+that cannot send data to the Cloud (NIS 2, GDPR, Cloud Act constraints). It detects threats in
+real time via a local AI, translates alerts into plain language, and proposes remediation actions
+that require explicit human validation before execution. No data ever leaves the perimeter.
+
+---
+
+## Tech Stack
+
+| Layer | Component | Version |
+|---|---|---|
+| Language | Python | 3.12 |
+| SIEM / Collection | Wazuh Manager | 4.7 |
+| Message Broker | RabbitMQ | 3.12 |
+| Local AI (triage) | Ollama — TinyLlama | 1.1B |
+| Local AI (reports) | Ollama — Mistral | 7B Q4 |
+| Vector DB / RAG | ChromaDB | 0.4.x |
+| SOAR | Shuffle SOAR | 1.2 |
+| Monitoring | Prometheus + Grafana | 2.45 / 10.4 |
+| Secrets | HashiCorp Vault (on-prem) | KMS AES-256 |
+| Containerisation | Docker Engine + Compose | latest stable |
+| CI/CD | GitHub Actions | — |
+
+---
+
+## Non-Negotiable Rules
+
+### 1. Zero Cloud Calls
+No dependency on OpenAI, Anthropic, AWS, Azure, GCP, or any external API.
+All AI inference runs exclusively through Ollama locally.
+Any PR introducing an outbound network call to a cloud endpoint **must be rejected**.
+
+### 2. Wazuh CPU < 5 %
+Never propose an agent configuration that exceeds 5 % CPU usage on the monitored host.
+Exceeding this threshold risks stopping industrial production. This constraint is absolute.
+
+### 3. Human-in-the-Loop
+Every critical action (server isolation, AD account revocation, firewall rule change) must wait
+for explicit human validation before execution. The system proposes — the human validates.
+Automated execution of critical actions without approval is a **blocker bug**.
+
+### 4. Zero Secrets in Code
+Keys, tokens, passwords, and certificates must never appear in source code or commits.
+In development: use `.env` (excluded from git via `.gitignore`).
+In production: all secrets are fetched from HashiCorp Vault via the Vault API.
+`detect-secrets` pre-commit hook blocks any commit containing a string resembling a secret.
+
+---
+
+## Commit Convention (Conventional Commits)
+
+```
+type(scope): short imperative description, lowercase, no trailing period
+
+Optional body if explanation is needed.
+
+Footer: BREAKING CHANGE: description, or Closes #123
+```
+
+**Types**: `feat` | `fix` | `perf` | `security` | `chore` | `docs` | `test` | `refactor` | `ci` | `revert`
+
+**Scopes**: `wazuh` | `rabbitmq` | `middleware` | `slm` | `llm` | `rag` | `soar` | `monitoring` | `vault` | `docker` | `ci` | `docs` | `security`
+
+**Valid examples**:
+```
+feat(middleware): add async rabbitmq consumer with retry logic
+fix(wazuh): enforce cpu cap below 5% on legacy servers
+security(vault): add key rotation policy for AES-256 backups
+chore(docker): pin all image versions for reproducibility
+ci(github-actions): add SAST scan step before image push
+```
+
+---
+
+## Python Style
+
+- **Python 3.12** — type hints are mandatory on every function signature and class attribute
+- **Docstrings**: Google style (`Args:`, `Returns:`, `Raises:`)
+- **Linter / Formatter**: Ruff (replaces Black + Flake8 + isort) — config in `pyproject.toml`
+- **Type checker**: Mypy in strict mode
+- **Line length**: 100 characters
+- **No `Any`** unless the use is justified by an inline comment explaining why
+- **No bare `except:`** — always catch a specific exception type
+- **No mutable default arguments** in function signatures
+
+---
+
+## Directory Structure
+
+```
+aegis/
+├── CLAUDE.md                   # This file — Copilot context
+├── README.md
+├── CHANGELOG.md
+├── LICENSE                     # Apache 2.0
+├── pyproject.toml              # Centralised config: Ruff, Mypy, Pytest, metadata
+├── .pre-commit-config.yaml
+├── .editorconfig
+├── .gitignore
+├── .env.example
+├── .github/
+│   ├── CONTRIBUTING.md
+│   ├── CODE_OF_CONDUCT.md
+│   ├── SECURITY.md
+│   ├── pull_request_template.md
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md
+│   │   └── feature_request.md
+│   └── workflows/
+│       └── ci.yml
+├── src/
+│   └── aegis/                  # Main Python package (to be built in v0.2+)
+│       ├── __init__.py
+│       ├── middleware/         # Orchestration core
+│       ├── collectors/         # Wazuh / log ingest adapters
+│       ├── llm/                # Ollama interface (triage + reports)
+│       ├── rag/                # ChromaDB interface
+│       ├── soar/               # Shuffle SOAR playbook triggers
+│       ├── vault/              # HashiCorp Vault client
+│       └── monitoring/         # Prometheus metrics
+├── tests/
+│   ├── unit/
+│   └── integration/
+└── docs/
+    └── adr/                    # Architecture Decision Records (MADR format)
+```
+
+---
+
+## Versioning
+
+- **Current version**: `v0.1.0`
+- **Scheme**: SemVer (`MAJOR.MINOR.PATCH`)
+- PATCH bump: automatic on every merged PR via CI
+- MINOR bump: human decision when a new feature is complete
+- **v1.0.0 release criteria**:
+  1. Successful NIS 2 / AI Act audit
+  2. Demonstrated MTTT (Mean Time To Triage) reduction ≥ 40 % in a real environment
+  3. Full test coverage on all critical paths (no-cloud check, CPU cap, human-in-the-loop gate)
