@@ -20,11 +20,13 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 1. Wazuh agents collect logs from endpoints, Active Directory, firewall devices, and databases.
 2. Logs are buffered in RabbitMQ to absorb peaks and prevent overload during an attack.
 3. TinyLlama (local SLM) performs first-pass triage and classifies events as normal or suspicious.
-4. If suspicious, Mistral 7B (local LLM) combines logs and asset context to write a plain-language
-   incident report.
-5. Shuffle SOAR presents the report to an operator for explicit validation.
-6. Only after human approval, containment actions are applied (for example firewall rule updates or
-   AD account lock).
+4. If suspicious: the middleware queries ChromaDB (local vector database) to retrieve the business
+  context of the targeted asset — its name, role, and criticality level.
+5. Mistral 7B (local LLM) combines the raw log, the asset context from ChromaDB, and the threat
+  pattern to generate a plain-language incident report.
+6. Shuffle SOAR presents the report to the operator for explicit validation.
+7. Only after human approval, containment actions are applied (for example firewall rule updates or
+  AD account lock).
 
 ## Why On-Premise
 
@@ -40,14 +42,14 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 | Language | Python | 3.12 |
 | SIEM / Collection | Wazuh Manager | 4.7 |
 | Message Broker | RabbitMQ | 3.12 |
-| Local AI (triage) | Ollama - TinyLlama | 1.1B |
-| Local AI (reports) | Ollama - Mistral | 7B Q4 |
+| Local AI (triage) | Ollama — TinyLlama | 1.1B |
+| Local AI (reports) | Ollama — Mistral | 7B Q4 |
 | Vector DB / RAG | ChromaDB | 0.4.x |
 | SOAR | Shuffle SOAR | 1.2 |
 | Monitoring | Prometheus + Grafana | 2.45 / 10.4 |
 | Secrets | HashiCorp Vault (on-prem) | KMS AES-256 |
 | Containerisation | Docker Engine + Compose | latest stable |
-| CI/CD | GitHub Actions | - |
+| CI/CD | GitHub Actions | — |
 
 ## Project Status
 
