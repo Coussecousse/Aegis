@@ -1,0 +1,4 @@
+# Tell GitHub Linguist to ignore non-project files for language stats
+commitlint.config.js linguist-detectable=false
+*.json               linguist-detectable=false
+docs/**              linguist-documentation=true
