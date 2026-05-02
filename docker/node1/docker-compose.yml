@@ -22,6 +22,7 @@ services:
       retries: 5
     networks:
       - aegis-internal
+      - aegis-monitoring
 
   rabbitmq:
     image: rabbitmq:3.12-management
@@ -101,18 +102,20 @@ services:
       OUTER_HOSTNAME: ${OUTER_HOSTNAME}
     networks:
       - aegis-internal
+      - aegis-monitoring
 
   shuffle-frontend:
     image: ghcr.io/shuffle/shuffle-frontend:1.2.0
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "3001:80"
     environment:
       BACKEND_HOSTNAME: shuffle-backend
     depends_on:
       - shuffle-backend
     networks:
       - aegis-internal
+      - aegis-monitoring
 
   shuffle-database:
     image: opensearchproject/opensearch:2.14.0
