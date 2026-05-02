@@ -1,0 +1,68 @@
+{
+  "vhosts": [
+    {
+      "name": "aegis"
+    }
+  ],
+  "users": [],
+  "permissions": [],
+  "parameters": [],
+  "policies": [],
+  "queues": [
+    {
+      "name": "aegis.triage",
+      "vhost": "aegis",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 300000,
+        "x-max-length": 10000
+      }
+    },
+    {
+      "name": "aegis.reports",
+      "vhost": "aegis",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 600000
+      }
+    },
+    {
+      "name": "aegis.deadletter",
+      "vhost": "aegis",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "aegis.alerts",
+      "vhost": "aegis",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "aegis.alerts",
+      "vhost": "aegis",
+      "destination": "aegis.triage",
+      "destination_type": "queue",
+      "routing_key": "alert.raw",
+      "arguments": {}
+    },
+    {
+      "source": "aegis.alerts",
+      "vhost": "aegis",
+      "destination": "aegis.deadletter",
+      "destination_type": "queue",
+      "routing_key": "alert.dead",
+      "arguments": {}
+    }
+  ]
+}
