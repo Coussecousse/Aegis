@@ -51,10 +51,34 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 | Containerisation | Docker Engine + Compose | latest stable |
 | CI/CD | GitHub Actions | — |
 
+## Infrastructure
+
+AEGIS runs on two physical nodes:
+
+**Node 1 — Controller VM** (standard x86 VM on company LAN)
+Hosts: Wazuh Manager, RabbitMQ, ChromaDB, Shuffle SOAR,
+Prometheus, Grafana. All services run in Docker on an isolated
+internal network with zero outbound internet access.
+
+**Node 2 — AI Appliance** (Raspberry Pi 5, 16 GB RAM, ARM)
+Hosts: Ollama with TinyLlama 1.1B (triage) and Mistral 7B Q4
+(incident reports). No Docker required — Ollama runs as a native
+service. Node 1 reaches it via HTTP on the local network.
+
+Docker configuration lives in `docker/node1/`.
+See `docker/node2/README.md` for Node 2 setup instructions.
+
 ## Project Status
 
-Current version: v0.1.0 - project scaffold only, no functional code yet.
-Infrastructure wiring starts at v0.2.0.
+| Version | Status | Description |
+|---------|--------|-------------|
+| v0.1.0 | ✅ Released | Project scaffold, CI/CD, governance |
+| v0.2.0 | ✅ Released | Docker infrastructure (Node 1), Wazuh custom rules |
+| v0.3.x | 🔧 In progress | Python middleware, RabbitMQ consumer, LLM triage |
+| v1.0.0 | 📋 Planned | Full pipeline, NIS 2 audit validated |
+
+Current branch: `develop` — active development.
+Stable branch: `main` — mirrors last release tag.
 
 ## Prerequisites
 
@@ -64,7 +88,63 @@ Infrastructure wiring starts at v0.2.0.
 
 ## Quick Start
 
-(available from v0.2.0 once infrastructure is wired)
+```bash
+# Clone and enter the repo
+git clone https://github.com/Coussecousse/Aegis.git
+cd Aegis
+git checkout main
+
+# Copy and fill in secrets
+cp .env.example .env
+# Edit .env with your local passwords (see .env.example for all variables)
+
+# Start the Node 1 stack
+cd docker/node1
+docker compose up -d
+
+# Verify all services are healthy
+docker compose ps
+```
+
+Once all services show `healthy`, the Wazuh Dashboard is available at
+`https://localhost:443` and Grafana at `http://localhost:3000`.
+
+> The AI triage pipeline (RabbitMQ → TinyLlama → Mistral → Shuffle SOAR)
+is under active development and will be available from v0.3.0.
+
+## Developer Setup
+
+```bash
+# Clone and enter the repo
+git clone https://github.com/Coussecousse/Aegis.git
+cd Aegis
+git checkout develop
+
+# Install dependencies and pre-commit hooks
+make install
+pre-commit install --install-hooks
+pre-commit install --hook-type commit-msg
+
+# Copy environment template
+cp .env.example .env
+# Edit .env with your local values
+```
+
+### Common commands
+
+| Command | Description |
+|---------|-------------|
+| `make lint` | Run Ruff linter |
+| `make format` | Check formatting (no changes) |
+| `make format-fix` | Auto-fix formatting |
+| `make typecheck` | Run Mypy strict type check |
+| `make test` | Run full test suite with coverage |
+| `make test-critical` | Run only critical path tests |
+| `make security-scan` | Run Bandit + pip-audit |
+| `make pre-commit-all` | Run all hooks on all files |
+| `make clean` | Remove cache directories |
+
+> Run `make help` for the full list.
 
 ## Contributing
 

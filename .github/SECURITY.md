@@ -6,7 +6,7 @@ If you discover a security vulnerability in AEGIS, do **not** open a public GitH
 
 Use private disclosure only:
 
-- Send an encrypted email to: **security@aegis-project.dev**
+- Send an encrypted email to: **adob.e@hotmail.com**
 - If you cannot encrypt your first message, send a minimal contact request and we will provide a
   secure channel for full details
 

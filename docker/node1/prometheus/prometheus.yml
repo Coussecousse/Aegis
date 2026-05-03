@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: wazuh
+    static_configs:
+      - targets: ['wazuh:55000']
+
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['rabbitmq:15692']
+
+  - job_name: middleware
+    static_configs:
+      - targets: ['middleware:8000']
+
+  - job_name: shuffle
+    static_configs:
+      - targets: ['shuffle-backend:3001']
+
+  - job_name: chromadb
+    static_configs:
+      - targets: ['chromadb:8001']

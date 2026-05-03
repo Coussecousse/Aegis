@@ -145,3 +145,15 @@ aegis/
   1. Successful NIS 2 / AI Act audit
   2. Demonstrated MTTT (Mean Time To Triage) reduction ≥ 40 % in a real environment
   3. Full test coverage on all critical paths (no-cloud check, CPU cap, human-in-the-loop gate)
+
+---
+
+## Working Style
+
+When generating code or files in a session:
+- Explain what you are about to generate and why before writing it (2-3 sentences).
+- Generate one file at a time.
+- After each file, briefly note what to verify before moving on.
+- Prefer small, focused changes over large blocks. If a task requires more than
+  2 files, pause and ask for confirmation before continuing.
+- Never silently skip a file — if you decide not to generate something, say why.
