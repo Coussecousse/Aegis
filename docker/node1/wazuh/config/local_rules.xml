@@ -1,0 +1,259 @@
+<group name="aegis,">
+
+  <!-- ================================================================== -->
+  <!-- Group 1 — Lateral Movement Detection (S1: Ransomware, S2: Exfil)   -->
+  <!-- ================================================================== -->
+
+  <!-- Rule 100001: Multiple failed AD authentications from same source IP -->
+  <!-- Parent: 60122 (Windows authentication failure)                      -->
+  <rule id="100001" level="10" frequency="5" timeframe="60">
+    <if_matched_sid>60122</if_matched_sid>
+    <same_source_ip />
+    <description>AeroTech S1/S2: Multiple failed AD authentication attempts (>5 in 60s) — possible brute-force or credential stuffing</description>
+    <group>authentication_failed,lateral_movement,</group>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100002: Successful login after repeated failures — credential stuffing -->
+  <!-- Parent: 60106 (Windows logon success) + correlated with 100001             -->
+  <rule id="100002" level="12">
+    <if_matched_sid>100001</if_matched_sid>
+    <if_sid>60106</if_sid>
+    <same_source_ip />
+    <description>AeroTech S1/S2: Successful AD login after multiple failures — credential stuffing pattern confirmed</description>
+    <group>authentication_success,authentication_failed,lateral_movement,</group>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100003: AD privilege escalation — added to Domain/Enterprise Admins -->
+  <!-- Parent: 60144 (Windows group membership change)                           -->
+  <rule id="100003" level="14">
+    <if_sid>60144</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)(domain admins|enterprise admins|schema admins|administrators)</field>
+    <description>AeroTech S4: AD privilege escalation — account added to privileged group (Domain/Enterprise Admins)</description>
+    <group>account_changed,privilege_escalation,</group>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100004: Login outside business hours (20:00–06:00) on Tier 0 assets -->
+  <!-- Parent: 60106 (Windows logon success)                                     -->
+  <rule id="100004" level="10">
+    <if_sid>60106</if_sid>
+    <field name="win.eventdata.workstationName" type="pcre2">(?i)(dc\d*|ad\d*|kms\d*|pki\d*)</field>
+    <time>20:00 - 06:00</time>
+    <description>AeroTech S4: Login on Tier 0 asset (AD/KMS) outside business hours (20:00–06:00)</description>
+    <group>policy_violation,after_hours,</group>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100005: Cross-tier violation — T0 admin account used on Tier 2 workstation -->
+  <!-- Parent: 60106 (Windows logon success)                                            -->
+  <!-- HIGHEST PRIORITY — PSSI Tiering violation                                        -->
+  <rule id="100005" level="15">
+    <if_sid>60106</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)(adm[-_]|t0[-_]|admin[-_]tier0|da[-_])</field>
+    <field name="win.eventdata.workstationName" type="pcre2">(?i)(ws[-_]|pc[-_]|laptop[-_]|poste[-_])</field>
+    <description>AeroTech S4: CRITICAL — Tier 0 admin account used on Tier 2 workstation — PSSI Tiering violation</description>
+    <group>policy_violation,tiering_violation,</group>
+    <mitre>
+      <id>T1078.002</id>
+    </mitre>
+  </rule>
+
+
+  <!-- ================================================================== -->
+  <!-- Group 2 — Ransomware Indicators (S1)                               -->
+  <!-- ================================================================== -->
+
+  <!-- Rule 100010: Mass file rename/delete on NAS — >100 operations in 30s -->
+  <!-- Parent: 554 (File modified) / 550 (File deleted) — FIM events         -->
+  <rule id="100010" level="14" frequency="100" timeframe="30">
+    <if_matched_sid>554</if_matched_sid>
+    <same_field>agent.name</same_field>
+    <description>AeroTech S1: Mass file modification on NAS (>100 ops in 30s) — ransomware encryption pattern</description>
+    <group>ransomware_indicator,syscheck,</group>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100011: Known ransomware extension detected by FIM -->
+  <!-- Parent: 554 (File modified)                             -->
+  <rule id="100011" level="15">
+    <if_sid>554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)\.(locked|encrypted|crypt|enc|ransom|wncry|zepto|locky|cerber)$</field>
+    <description>AeroTech S1: CRITICAL — Ransomware file extension detected on monitored path</description>
+    <group>ransomware_indicator,syscheck,</group>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100012: PostgreSQL data directory modified outside backup window (01:00–05:00) -->
+  <!-- Parent: 554 (File modified)                                                          -->
+  <rule id="100012" level="12">
+    <if_sid>554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)/var/lib/postgresql|/pgdata</field>
+    <time>05:01 - 00:59</time>
+    <description>AeroTech S1/S8: PostgreSQL data directory modified outside backup window (01:00–05:00)</description>
+    <group>database_integrity,syscheck,</group>
+    <mitre>
+      <id>T1565.001</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100013: Shadow copy deletion — VSS/WMI commands (ransomware pre-encryption) -->
+  <!-- Parent group: sysmon_event1 (Windows process creation)                            -->
+  <rule id="100013" level="14">
+    <if_group>sysmon_event1</if_group>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(vssadmin.*delete|wmic.*shadowcopy.*delete|wbadmin.*delete|bcdedit.*recoveryenabled.*no|diskshadow)</field>
+    <description>AeroTech S1: Shadow copy deletion attempt detected — pre-ransomware indicator</description>
+    <group>ransomware_indicator,defense_evasion,</group>
+    <mitre>
+      <id>T1490</id>
+    </mitre>
+  </rule>
+
+
+  <!-- ================================================================== -->
+  <!-- Group 3 — Data Exfiltration (S2)                                   -->
+  <!-- ================================================================== -->
+
+  <!-- Rule 100020: Large outbound transfer from NAS host (>500MB in one session) -->
+  <!-- Parent group: syslog (firewall/proxy/network telemetry)                    -->
+  <rule id="100020" level="12">
+    <if_group>syslog</if_group>
+    <field name="data.srcip" type="pcre2">^192\.168\.(10|11)\.</field>
+    <field name="data.size" type="pcre2">^[5-9][0-9]{8}|^[1-9][0-9]{9}</field>
+    <description>AeroTech S2: Large outbound data transfer from NAS host (>500MB) — potential exfiltration</description>
+    <group>data_exfiltration,network_anomaly,</group>
+    <mitre>
+      <id>T1048</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100021: NAS access from non-engineering VLAN -->
+  <!-- Parent: 550 or 554 (FIM) or custom syslog decoder  -->
+  <rule id="100021" level="10">
+    <if_sid>554</if_sid>
+    <field name="syscheck.path" type="pcre2">(?i)/mnt/nas|/shares/plans|/shares/brevets</field>
+    <field name="data.srcip" type="pcre2">^(?!192\.168\.20\.)</field>
+    <description>AeroTech S2: NAS access from non-engineering VLAN — unauthorized access to industrial plans/patents</description>
+    <group>data_exfiltration,policy_violation,</group>
+    <mitre>
+      <id>T1530</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100022: PostgreSQL dump by non-DBA account -->
+  <!-- Parent group: syslog (PostgreSQL logs)          -->
+  <rule id="100022" level="13">
+    <if_group>syslog</if_group>
+    <program_name type="pcre2">(?i)postgres|postgresql</program_name>
+    <field name="data.pg.query" type="pcre2">(?i)(pg_dump|COPY\s+\w+\s+TO\s+|\\copy)</field>
+    <field name="data.pg.user" type="pcre2">(?i)^(?!(backup_svc|dba_|pg_backup))</field>
+    <description>AeroTech S2: PostgreSQL dump/export executed by non-DBA account — potential data exfiltration</description>
+    <group>data_exfiltration,database_integrity,</group>
+    <mitre>
+      <id>T1005</id>
+    </mitre>
+  </rule>
+
+
+  <!-- ================================================================== -->
+  <!-- Group 4 — Insider Threat / Sabotage (S8)                          -->
+  <!-- ================================================================== -->
+
+  <!-- Rule 100030: Direct psql connection from workstation (bypass app layer) -->
+  <!-- Parent group: syslog (PostgreSQL logs)                                   -->
+  <rule id="100030" level="11">
+    <if_group>syslog</if_group>
+    <program_name type="pcre2">(?i)postgres|postgresql</program_name>
+    <field name="data.pg.client_addr" type="pcre2">^192\.168\.(30|31|40)\.</field>
+    <field name="data.pg.application_name" type="pcre2">(?i)(psql|dbeaver|datagrip|pgadmin|tableplus)</field>
+    <description>AeroTech S8: Direct database connection from workstation bypassing application layer</description>
+    <group>database_integrity,policy_violation,</group>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100031: Wazuh agent stopped or tampered with — SOC blinding attempt -->
+  <!-- Parent: 504 (Wazuh agent disconnected)                                     -->
+  <!-- HIGHEST ALERT — someone is trying to blind the SOC                        -->
+  <rule id="100031" level="15">
+    <if_sid>504</if_sid>
+    <description>AeroTech S8: CRITICAL — Wazuh agent disconnected/stopped — possible SOC blinding attempt</description>
+    <group>integrity_monitoring,agent_tampering,</group>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100032: Sudo/privilege escalation outside maintenance window -->
+  <!-- Parent: 5402 (Successful sudo)                                    -->
+  <rule id="100032" level="10">
+    <if_sid>5402</if_sid>
+    <time>20:00 - 06:00</time>
+    <description>AeroTech S8: Sudo privilege escalation on Linux host outside maintenance window</description>
+    <group>privilege_escalation,after_hours,</group>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+  </rule>
+
+
+  <!-- ================================================================== -->
+  <!-- Group 5 — Supply Chain / External Access (S3)                     -->
+  <!-- ================================================================== -->
+
+  <!-- Rule 100040: New software installed on Tier 1 server outside change window -->
+  <!-- Parent: 2902 (New package installed) / 67000 (Windows software install)    -->
+  <rule id="100040" level="11">
+    <if_sid>2902</if_sid>
+    <field name="agent.name" type="pcre2">(?i)(srv[-_]|server[-_]|t1[-_])</field>
+    <time>08:01 - 17:59</time>
+    <description>AeroTech S3: Software installed on Tier 1 server outside change management window</description>
+    <group>software_installation,policy_violation,</group>
+    <mitre>
+      <id>T1195.002</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100041: Outbound connection from internal server to unknown external IP (C2) -->
+  <!-- Parent group: syslog (firewall/proxy/network telemetry)                            -->
+  <rule id="100041" level="13">
+    <if_group>syslog</if_group>
+    <field name="data.srcip" type="pcre2">^192\.168\.</field>
+    <field name="data.dstip" type="pcre2">^(?!192\.168\.)(?!10\.)(?!172\.(1[6-9]|2[0-9]|3[01])\.)</field>
+    <field name="agent.name" type="pcre2">(?i)(srv[-_]|server[-_]|t1[-_])</field>
+    <description>AeroTech S3: Outbound connection from internal server to external IP — potential C2 communication</description>
+    <group>network_anomaly,c2_communication,</group>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100042: RabbitMQ management API accessed from non-admin host -->
+  <!-- Parent group: web (access logs)                                   -->
+  <rule id="100042" level="10">
+    <if_group>web</if_group>
+    <field name="data.url" type="pcre2">(?i)/api/|/rabbitmq/api/</field>
+    <field name="data.dstport" type="pcre2">^15672$</field>
+    <field name="data.srcip" type="pcre2">^(?!192\.168\.1\.(10|11|12|20)$)</field>
+    <description>AeroTech S3: RabbitMQ management API accessed from non-admin host — unauthorized broker access</description>
+    <group>network_anomaly,policy_violation,</group>
+    <mitre>
+      <id>T1071.001</id>
+    </mitre>
+  </rule>
+
+</group>
