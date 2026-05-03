@@ -73,7 +73,8 @@ See `docker/node2/README.md` for Node 2 setup instructions.
 | Version | Status | Description |
 |---------|--------|-------------|
 | v0.1.0 | ✅ Released | Project scaffold, CI/CD, governance |
-| v0.2.x | 🔧 In progress | Docker infrastructure (Node 1) |
+| v0.2.0 | ✅ Released | Docker infrastructure (Node 1), Wazuh custom rules |
+| v0.3.x | 🔧 In progress | Python middleware, RabbitMQ consumer, LLM triage |
 | v1.0.0 | 📋 Planned | Full pipeline, NIS 2 audit validated |
 
 Current branch: `develop` — active development.
@@ -87,7 +88,29 @@ Stable branch: `main` — mirrors last release tag.
 
 ## Quick Start
 
-(available from v0.2.0 once infrastructure is wired)
+```bash
+# Clone and enter the repo
+git clone https://github.com/Coussecousse/Aegis.git
+cd Aegis
+git checkout main
+
+# Copy and fill in secrets
+cp .env.example .env
+# Edit .env with your local passwords (see .env.example for all variables)
+
+# Start the Node 1 stack
+cd docker/node1
+docker compose up -d
+
+# Verify all services are healthy
+docker compose ps
+```
+
+Once all services show `healthy`, the Wazuh Dashboard is available at
+`https://localhost:443` and Grafana at `http://localhost:3000`.
+
+> The AI triage pipeline (RabbitMQ → TinyLlama → Mistral → Shuffle SOAR)
+is under active development and will be available from v0.3.0.
 
 ## Developer Setup
 
