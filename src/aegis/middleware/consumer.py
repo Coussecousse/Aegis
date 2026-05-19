@@ -1,7 +1,7 @@
 """
 RabbitMQ consumer for AEGIS pipeline.
 
-Listens to aegis.wazuh.alerts queue for incoming Wazuh alerts.
+Listens to the configured RabbitMQ queue for incoming Wazuh alerts.
 For each message:
 1. Parse JSON → WazuhLog
 2. Call pipeline.process_log()
@@ -14,6 +14,7 @@ Zero cloud calls. On-premise RabbitMQ only.
 import asyncio
 import json
 import logging
+from urllib.parse import quote
 
 import aio_pika
 from aio_pika.abc import (
@@ -42,7 +43,8 @@ class RabbitMQConsumer:
         rabbitmq_port: int = 5672,
         rabbitmq_user: str = "guest",
         rabbitmq_password: str | None = None,
-        queue_name: str = "aegis.wazuh.alerts",
+        rabbitmq_vhost: str = "aegis",
+        queue_name: str = "aegis.triage",
         ollama_base_url: str = "http://10.0.0.1:11434",
         chromadb_host: str = "localhost",
         chromadb_port: int = 8000,
@@ -59,7 +61,8 @@ class RabbitMQConsumer:
             rabbitmq_port: RabbitMQ server port.
             rabbitmq_user: RabbitMQ username.
             rabbitmq_password: RabbitMQ password.
-            queue_name: Queue to listen to (default: aegis.wazuh.alerts).
+            rabbitmq_vhost: RabbitMQ virtual host.
+            queue_name: Queue to listen to (default: aegis.triage).
             ollama_base_url: Ollama API base URL.
             chromadb_host: ChromaDB server hostname.
             chromadb_port: ChromaDB server port.
@@ -72,6 +75,7 @@ class RabbitMQConsumer:
         self.rabbitmq_port = rabbitmq_port
         self.rabbitmq_user = rabbitmq_user
         self.rabbitmq_password = rabbitmq_password
+        self.rabbitmq_vhost = rabbitmq_vhost
         self.queue_name = queue_name
 
         self.ollama_base_url = ollama_base_url
@@ -98,19 +102,20 @@ class RabbitMQConsumer:
 
         # Build connection URL
         safe_password = self.rabbitmq_password or ""
+        encoded_vhost = quote(self.rabbitmq_vhost or "/", safe="")
         connection_url = (
             f"amqp://{self.rabbitmq_user}:{safe_password}"
-            f"@{self.rabbitmq_host}:{self.rabbitmq_port}/"
+            f"@{self.rabbitmq_host}:{self.rabbitmq_port}/{encoded_vhost}"
         )
 
         try:
             connection = await aio_pika.connect_robust(connection_url)
             channel = await connection.channel()
 
-            # Declare queue (idempotent: safe if already exists)
+            # Attach to the queue provisioned by RabbitMQ definitions.
             queue = await channel.declare_queue(
                 self.queue_name,
-                durable=True,
+                passive=True,
             )
 
             self.connection = connection
