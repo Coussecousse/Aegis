@@ -46,6 +46,7 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 | Local AI (reports) | Ollama — Mistral | 7B Q4 |
 | Vector DB / RAG | ChromaDB | 0.4.x |
 | SOAR | Shuffle SOAR | 1.2 |
+| Search backend (dependency) | OpenSearch | via Wazuh Indexer and Shuffle datastore |
 | Monitoring | Prometheus + Grafana | 2.45 / 10.4 |
 | Secrets | HashiCorp Vault (on-prem) | KMS AES-256 |
 | Containerisation | Docker Engine + Compose | latest stable |
@@ -67,6 +68,16 @@ service. Node 1 reaches it via HTTP on the local network.
 
 Docker configuration lives in `docker/node1/`.
 See `docker/node2/README.md` for Node 2 setup instructions.
+
+### Runtime Modes (Node 1)
+
+- **Core mode (default):** Wazuh + RabbitMQ + ChromaDB + Middleware + Prometheus + Grafana.
+  Shuffle services are not started.
+- **Full mode:** Core mode + Shuffle SOAR backend/frontend + Shuffle datastore (OpenSearch).
+
+OpenSearch is therefore present in two places:
+- Wazuh Indexer (required by Wazuh itself)
+- Shuffle datastore (required only in full mode)
 
 ## Project Status
 
@@ -98,16 +109,20 @@ git checkout main
 cp .env.example .env
 # Edit .env with your local passwords (see .env.example for all variables)
 
-# Start the Node 1 stack
-cd docker/node1
-docker compose up -d
+# Start Node 1 in core mode (default, without Shuffle)
+make docker-up
+
+# Or start Node 1 in full mode (includes Shuffle + its OpenSearch datastore)
+make docker-up-full
 
 # Verify all services are healthy
 docker compose ps
 ```
 
-Once all services show `healthy`, the Wazuh Dashboard is available at
+Once core services show `healthy`, the Wazuh Dashboard is available at
 `https://localhost:443` and Grafana at `http://localhost:3000`.
+
+In full mode, Shuffle Frontend is available at `http://localhost:3001`.
 
 > The AI triage pipeline (RabbitMQ → TinyLlama → Mistral → Shuffle SOAR)
 is under active development and will be available from v0.3.0.
@@ -143,6 +158,10 @@ cp .env.example .env
 | `make security-scan` | Run Bandit + pip-audit |
 | `make pre-commit-all` | Run all hooks on all files |
 | `make clean` | Remove cache directories |
+| `make docker-up` | Start Node 1 in core mode (without Shuffle) |
+| `make docker-up-full` | Start Node 1 in full mode (with Shuffle) |
+| `make docker-pull` | Pull core-mode images |
+| `make docker-pull-full` | Pull full-mode images |
 
 > Run `make help` for the full list.
 
