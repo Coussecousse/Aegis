@@ -5,6 +5,7 @@ else
 ENV_FILE=.env
 endif
 COMPOSE=docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE)
+COMPOSE_FULL=$(COMPOSE) --profile full
 
 # Cross-platform venv binary path
 ifeq ($(OS),Windows_NT)
@@ -15,8 +16,8 @@ endif
 
 .PHONY: help install lint format format-fix typecheck test test-critical \
         security-scan pre-commit-all clean \
-        docker-check docker-up docker-ps docker-logs docker-down \
-        docker-clean docker-restart docker-pull
+	docker-check docker-up docker-up-core docker-up-full docker-ps docker-logs docker-down \
+	docker-clean docker-restart docker-pull docker-pull-full
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -74,8 +75,14 @@ clean: ## Remove __pycache__, .mypy_cache, .ruff_cache, .pytest_cache
 docker-check: ## Validate compose config
 	$(COMPOSE) config
 
-docker-up: ## Start Node 1 stack in detached mode
+docker-up: ## Start Node 1 core stack in detached mode (without Shuffle)
 	$(COMPOSE) up -d --no-build --no-recreate
+
+docker-up-core: ## Alias of docker-up (without Shuffle)
+	$(COMPOSE) up -d --no-build --no-recreate
+
+docker-up-full: ## Start full Node 1 stack including Shuffle SOAR
+	$(COMPOSE_FULL) up -d --no-build --no-recreate
 
 docker-ps: ## Show running services
 	$(COMPOSE) ps
@@ -93,5 +100,8 @@ docker-restart: ## Restart stack
 	$(COMPOSE) stop
 	$(COMPOSE) start
 
-docker-pull: ## Pull latest images
+docker-pull: ## Pull latest images for core stack (without Shuffle)
 	$(COMPOSE) pull
+
+docker-pull-full: ## Pull latest images including Shuffle services
+	$(COMPOSE_FULL) pull

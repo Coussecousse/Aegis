@@ -48,7 +48,6 @@ services:
         hard: 655360
     volumes:
       - wazuh-api-configuration:/var/ossec/api/configuration
-      - wazuh-etc:/var/ossec/etc
       - wazuh-logs:/var/ossec/logs
       - wazuh-queue:/var/ossec/queue
       - wazuh-var-multigroups:/var/ossec/var/multigroups
@@ -61,7 +60,6 @@ services:
       - ./wazuh/certs/root-ca-manager.pem:/etc/ssl/root-ca.pem:ro
       - ./wazuh/certs/wazuh.manager.pem:/etc/ssl/filebeat.pem:ro
       - ./wazuh/certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key:ro
-      - ./wazuh/config/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
     environment:
       INDEXER_URL: https://wazuh.indexer:9200
       INDEXER_USERNAME: admin
@@ -130,12 +128,27 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
       RABBITMQ_DEFAULT_VHOST: aegis
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
     healthcheck:
       test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      - aegis-internal
+
+  rabbitmq-bootstrap:
+    image: curlimages/curl:8.12.1
+    restart: "no"
+    command: ["sh", "/bootstrap/bootstrap-definitions.sh"]
+    volumes:
+      - ./rabbitmq/config/definitions.json:/bootstrap/definitions.json:ro
+      - ./rabbitmq/config/bootstrap-definitions.sh:/bootstrap/bootstrap-definitions.sh:ro
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - aegis-internal
 
@@ -158,28 +171,32 @@ services:
       - aegis-internal
 
   middleware:
-    image: python:3.12-slim
-    command: ["sh", "-c", "tail -f /dev/null"]
+    build:
+      context: ../..
+      dockerfile: docker/node1/middleware/Dockerfile
     restart: unless-stopped
     environment:
-      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
-      CHROMADB_HOST: ${CHROMADB_HOST}
-      CHROMADB_PORT: ${CHROMADB_PORT}
-      OLLAMA_HOST: ${OLLAMA_HOST}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-aegis}
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-aegis.triage}
+      CHROMADB_HOST: chromadb
+      CHROMADB_PORT: ${CHROMADB_PORT:-8000}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
       SLM_MODEL: ${SLM_MODEL}
       LLM_MODEL: ${LLM_MODEL}
-      WAZUH_MANAGER_HOST: ${WAZUH_MANAGER_HOST}
-      WAZUH_API_PORT: ${WAZUH_API_PORT}
-      WAZUH_API_USER: ${WAZUH_API_USER}
-      WAZUH_API_PASSWORD: ${WAZUH_API_PASSWORD}
+      SLM_TIMEOUT: ${SLM_TIMEOUT:-10}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-45}
+      SUSPICION_THRESHOLD: ${SUSPICION_THRESHOLD:-0.5}
       SHUFFLE_WEBHOOK_URL: ${SHUFFLE_WEBHOOK_URL}
-      WAZUH_AGENT_CPU_CAP_PERCENT: ${WAZUH_AGENT_CPU_CAP_PERCENT:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
         condition: service_healthy
+      rabbitmq-bootstrap:
+        condition: service_completed_successfully
       chromadb:
         condition: service_healthy
     networks:
@@ -187,20 +204,26 @@ services:
 
   shuffle-backend:
     image: ghcr.io/shuffle/shuffle-backend:1.2.0
+    profiles: ["full"]
     restart: unless-stopped
     volumes:
       - shuffle-data:/shuffle-data
     environment:
       BACKEND_HOSTNAME: shuffle-backend
       DATASTORE_EMULATOR_HOST: shuffle-database:8000
+      OPENSEARCH_URL: http://shuffle-database:9200
+      SHUFFLE_OPENSEARCH_SKIPSSL: "true"
       SHUFFLE_ENCRYPTION_MODIFIER: ${SHUFFLE_ENCRYPTION_MODIFIER}
       OUTER_HOSTNAME: ${OUTER_HOSTNAME}
+    depends_on:
+      - shuffle-database
     networks:
       - aegis-internal
       - aegis-monitoring
 
   shuffle-frontend:
     image: ghcr.io/shuffle/shuffle-frontend:1.2.0
+    profiles: ["full"]
     restart: unless-stopped
     ports:
       - "3001:80"
@@ -214,6 +237,7 @@ services:
 
   shuffle-database:
     image: opensearchproject/opensearch:2.14.0
+    profiles: ["full"]
     restart: unless-stopped
     environment:
       discovery.type: single-node
@@ -222,7 +246,9 @@ services:
     volumes:
       - shuffle-data:/usr/share/opensearch/data
     networks:
-      - aegis-internal
+      aegis-internal:
+        aliases:
+          - shuffle-opensearch
 
   prometheus:
     image: prom/prometheus:v2.45.6
@@ -266,7 +292,6 @@ networks:
 
 volumes:
   wazuh-api-configuration:
-  wazuh-etc:
   wazuh-logs:
   wazuh-queue:
   wazuh-var-multigroups:
