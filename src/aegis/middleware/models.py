@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WazuhLog(BaseModel):
@@ -35,10 +35,8 @@ class WazuhLog(BaseModel):
     )
     decoder_name: str | None = Field(None, description="Décodeur utilisé (ex: windows-eventlog)")
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "timestamp": "2026-05-19T14:32:15Z",
@@ -52,6 +50,7 @@ class WazuhLog(BaseModel):
                 "decoder_name": "windows-eventlog",
             }
         }
+    )
 
 
 class SlmResponse(BaseModel):
@@ -79,10 +78,8 @@ class SlmResponse(BaseModel):
         ..., description="Probabilités brutes : {'suspect': float, 'benign': float}"
     )
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "is_suspect": True,
                 "confidence": 0.87,
@@ -91,6 +88,7 @@ class SlmResponse(BaseModel):
                 "raw_probabilities": {"suspect": 0.87, "benign": 0.13},
             }
         }
+    )
 
 
 class LlmResponse(BaseModel):
@@ -127,10 +125,8 @@ class LlmResponse(BaseModel):
         description="Probabilités brutes : {'attack': float, 'false_positive': float}",
     )
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "attack_confirmed": True,
                 "confidence": 0.91,
@@ -144,6 +140,7 @@ class LlmResponse(BaseModel):
                 "raw_probabilities": {"attack": 0.91, "false_positive": 0.09},
             }
         }
+    )
 
 
 class UEBAMetrics(BaseModel):
@@ -174,10 +171,8 @@ class UEBAMetrics(BaseModel):
         description="Score d'anomalie cumulée (0.0=normal, 1.0=très anormal)",
     )
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "baseline_description": (
                     "Contrôleur de Domaine : authentifications de 08:00-18:00, "
@@ -192,6 +187,7 @@ class UEBAMetrics(BaseModel):
                 "anomaly_score": 0.68,
             }
         }
+    )
 
 
 class RagContext(BaseModel):
@@ -211,10 +207,8 @@ class RagContext(BaseModel):
         ..., description="Behavioral analytics: baselines, anomalies, user context"
     )
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "asset_name": "DC-AEROTECH-01",
                 "asset_criticality": "tier0",
@@ -238,6 +232,7 @@ class RagContext(BaseModel):
                 },
             }
         }
+    )
 
 
 class RiskScore(BaseModel):
@@ -265,10 +260,8 @@ class RiskScore(BaseModel):
         "rule_contribution, criticality_multiplier",
     )
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "danger_score": 0.94,
                 "confidence_interval": 0.06,
@@ -281,6 +274,7 @@ class RiskScore(BaseModel):
                 },
             }
         }
+    )
 
 
 class Decision(BaseModel):
@@ -299,10 +293,8 @@ class Decision(BaseModel):
     )
     recommended_action: str = Field(..., description="Action recommandée pour la remédiation")
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "severity": "critical",
                 "requires_human_validation": True,
@@ -310,6 +302,7 @@ class Decision(BaseModel):
                 "recommended_action": "Isoler le poste source via Active Directory LDAPS",
             }
         }
+    )
 
 
 class AegisReport(BaseModel):
@@ -330,10 +323,8 @@ class AegisReport(BaseModel):
         ..., ge=0, description="Temps de traitement complet en millisecondes"
     )
 
-    class Config:
-        """Pydantic v2 config."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "alert_id": "550e8400-e29b-41d4-a716-446655440000",
                 "timestamp": "2026-05-19T14:35:42Z",
@@ -412,3 +403,4 @@ class AegisReport(BaseModel):
                 "processing_time_ms": 3240,
             }
         }
+    )
