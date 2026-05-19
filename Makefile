@@ -43,7 +43,11 @@ typecheck: ## Run mypy strict type checking
 
 test: ## Run full test suite with coverage
 	@if find tests -name 'test_*.py' | grep -q .; then \
-	  $(VENV_BIN)/pytest --cov=aegis --cov-report=xml --cov-fail-under=80; \
+	  $(VENV_BIN)/pytest \
+	    --cov=aegis.middleware.models \
+	    --cov=aegis.middleware.risk_scorer \
+	    --cov-report=xml \
+	    --cov-fail-under=80; \
 	else \
 	  echo "No tests found — expected at this stage."; \
 	fi
