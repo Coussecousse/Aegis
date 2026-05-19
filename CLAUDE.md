@@ -78,6 +78,41 @@ chore(docker): pin all image versions for reproducibility
 ci(github-actions): add SAST scan step before image push
 ```
 
+### Commit Granularity Policy (Mandatory)
+
+- Keep commits **small, atomic, and reviewable**.
+- Default target: **1 concern per commit** (feature unit, fix unit, or test unit).
+- Avoid mixing unrelated areas in one commit (e.g., middleware + docs + CI together).
+- Separate commits by intent when possible:
+  - code changes
+  - tests
+  - tooling/config
+  - documentation
+- If a commit touches many files, explain why in the commit body.
+- Prefer a sequence of short commits over one large commit.
+
+### Mandatory Quality Gate Before Commit/Push
+
+Before every commit (and again before push), run and pass:
+
+1. Ruff lint
+2. Ruff format check
+3. Mypy strict
+4. Pytest
+5. Pre-commit hooks
+
+Preferred commands:
+
+```bash
+.venv/Scripts/ruff check src/ tests/ || .venv/bin/ruff check src/ tests/
+.venv/Scripts/ruff format --check src/ tests/ || .venv/bin/ruff format --check src/ tests/
+.venv/Scripts/mypy src/ || .venv/bin/mypy src/
+.venv/Scripts/pytest || .venv/bin/pytest
+.venv/Scripts/pre-commit run --all-files || .venv/bin/pre-commit run --all-files
+```
+
+If one step fails: do not commit/push until fixed.
+
 ---
 
 ## Python Style
@@ -157,3 +192,12 @@ When generating code or files in a session:
 - Prefer small, focused changes over large blocks. If a task requires more than
   2 files, pause and ask for confirmation before continuing.
 - Never silently skip a file — if you decide not to generate something, say why.
+
+### Default Agent Behavior (Do Not Ask Repeatedly)
+
+Unless explicitly told otherwise in the current session, the agent must:
+
+- enforce commit granularity policy above,
+- run the full quality gate before commit/push,
+- use conventional commits that are specific and short,
+- avoid committing files explicitly marked as "hold" by the user.
