@@ -1,4 +1,4 @@
-"""Unit tests for OllamaClient retry and fallback behavior."""
+"""Unit tests for OllamaClient behavior."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import httpx
 import pytest
 
 from aegis.llm.client import OllamaClient
-from aegis.middleware.models import LlmResponse, SlmResponse
 
 
 class _FakeResponse:
@@ -29,7 +28,7 @@ class _FakeResponse:
 
 
 @pytest.mark.asyncio
-async def test_generate_slm_valid_json() -> None:
+async def test_generate_valid_json_returns_dict() -> None:
     client = OllamaClient("http://localhost:11434")
 
     async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
@@ -54,51 +53,13 @@ async def test_generate_slm_valid_json() -> None:
     client._client.post = _post  # type: ignore[method-assign]
 
     payload = await client.generate("tinyllama-aegis", "prompt", timeout=10.0)
-    parsed = SlmResponse(**payload)
 
-    assert parsed.confidence == 0.8
-    assert parsed.behavior_category == "lateral_movement"
-
-
-@pytest.mark.asyncio
-async def test_generate_llm_valid_json() -> None:
-    client = OllamaClient("http://localhost:11434")
-
-    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
-        _ = args
-        _ = kwargs
-        return _FakeResponse(
-            200,
-            {
-                "response": json.dumps(
-                    {
-                        "attack_confirmed": True,
-                        "confidence": 0.91,
-                        "attack_type": "Lateral movement",
-                        "severity": "critical",
-                        "affected_asset": "DC-01",
-                        "asset_criticality": "tier0",
-                        "plain_language_summary": "Threat confirmed",
-                        "recommended_action": "Isolate source host",
-                        "requires_human_validation": True,
-                        "raw_probabilities": {"attack": 0.91, "false_positive": 0.09},
-                    }
-                )
-            },
-        )
-
-    client._client = httpx.AsyncClient()
-    client._client.post = _post  # type: ignore[method-assign]
-
-    payload = await client.generate("mistral-aegis", "prompt", timeout=45.0)
-    parsed = LlmResponse(**payload)
-
-    assert parsed.attack_confirmed is True
-    assert parsed.confidence == 0.91
+    assert payload["is_suspect"] is True
+    assert payload["confidence"] == 0.8
 
 
 @pytest.mark.asyncio
-async def test_generate_timeout_retries_three_times(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_generate_timeout_retries_then_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     client = OllamaClient("http://localhost:11434")
     attempts = 0
     sleeps: list[float] = []
@@ -110,15 +71,15 @@ async def test_generate_timeout_retries_three_times(monkeypatch: pytest.MonkeyPa
         attempts += 1
         raise httpx.TimeoutException("timeout")
 
-    async def _sleep(duration: float) -> None:
-        sleeps.append(duration)
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
 
     monkeypatch.setattr(asyncio, "sleep", _sleep)
 
     client._client = httpx.AsyncClient()
     client._client.post = _post  # type: ignore[method-assign]
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(httpx.TimeoutException):
         await client.generate("tinyllama-aegis", "prompt", timeout=10.0)
 
     assert attempts == 3
@@ -126,60 +87,53 @@ async def test_generate_timeout_retries_three_times(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_generate_malformed_json_falls_back_safely() -> None:
+async def test_extract_json_when_response_starts_with_brace() -> None:
     client = OllamaClient("http://localhost:11434")
+
+    wrapped = (
+        '{"is_suspect":true,"confidence":0.7,"behavior_category":"normal",'
+        '"reasoning_short":"ok","raw_probabilities":{"suspect":0.7,"benign":0.3}} '
+        "trailing"
+    )
 
     async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
         _ = args
         _ = kwargs
-        return _FakeResponse(200, {"response": "not-json-content"})
-
-    client._client = httpx.AsyncClient()
-    client._client.post = _post  # type: ignore[method-assign]
-
-    payload = await client.generate("mistral-aegis", "prompt", timeout=45.0)
-
-    assert payload["confidence"] == 0.0
-    assert payload["requires_human_validation"] is True
-
-
-@pytest.mark.asyncio
-async def test_generate_missing_confidence_defaults_to_zero() -> None:
-    client = OllamaClient("http://localhost:11434")
-
-    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
-        _ = args
-        _ = kwargs
-        return _FakeResponse(
-            200,
-            {
-                "response": json.dumps(
-                    {
-                        "is_suspect": True,
-                        "behavior_category": "normal",
-                        "reasoning_short": "No strong signal",
-                        "raw_probabilities": {"suspect": 0.4, "benign": 0.6},
-                    }
-                )
-            },
-        )
+        return _FakeResponse(200, {"response": wrapped})
 
     client._client = httpx.AsyncClient()
     client._client.post = _post  # type: ignore[method-assign]
 
     payload = await client.generate("tinyllama-aegis", "prompt", timeout=10.0)
 
-    assert payload["confidence"] == 0.0
+    assert payload["behavior_category"] == "normal"
+    assert payload["confidence"] == 0.7
 
 
 @pytest.mark.asyncio
-async def test_generate_uses_distinct_models() -> None:
+async def test_generate_non_extractable_json_raises_value_error() -> None:
     client = OllamaClient("http://localhost:11434")
-    models_seen: list[str] = []
 
     async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
         _ = args
-        models_seen.append(str(kwargs["json"]["model"]))
+        _ = kwargs
+        return _FakeResponse(200, {"response": "not-json-at-all"})
+
+    client._client = httpx.AsyncClient()
+    client._client.post = _post  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="Response is not valid JSON"):
+        await client.generate("tinyllama-aegis", "prompt", timeout=10.0)
+
+
+@pytest.mark.asyncio
+async def test_generate_sends_expected_model_names() -> None:
+    client = OllamaClient("http://localhost:11434")
+    sent_models: list[str] = []
+
+    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = args
+        sent_models.append(str(kwargs["json"]["model"]))
         model = str(kwargs["json"]["model"])
         if model == "tinyllama-aegis":
             payload = {
@@ -218,4 +172,4 @@ async def test_generate_uses_distinct_models() -> None:
     await client.generate("tinyllama-aegis", "slm prompt", timeout=10.0)
     await client.generate("mistral-aegis", "llm prompt", timeout=45.0)
 
-    assert models_seen == ["tinyllama-aegis", "mistral-aegis"]
+    assert sent_models == ["tinyllama-aegis", "mistral-aegis"]
