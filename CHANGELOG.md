@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-21
+
+### Added
+
+- Release v0.3.0: runtime hardening for middleware Docker build, logging,
+  RabbitMQ credential encoding, and ChromaDB client compatibility.
+
+### Fixed
+
+- Middleware Docker image now installs the build toolchain needed for Python
+  packages with native extensions.
+- Logging setup now clears duplicate handlers and writes to the configured
+  `LOG_FILE` path when present.
+- RabbitMQ credentials are URL-encoded before building the AMQP connection URL.
+- ChromaDB client now tolerates both async and sync HTTP client variants.
+
 ## [0.2.0] - 2026-05-03
 
 ### Added

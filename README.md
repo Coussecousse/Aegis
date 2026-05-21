@@ -85,7 +85,7 @@ OpenSearch is therefore present in two places:
 |---------|--------|-------------|
 | v0.1.0 | ✅ Released | Project scaffold, CI/CD, governance |
 | v0.2.0 | ✅ Released | Docker infrastructure (Node 1), Wazuh custom rules |
-| v0.3.x | 🔧 In progress | Python middleware, RabbitMQ consumer, LLM triage |
+| v0.3.0 | ✅ Released | Middleware runtime hardening, RabbitMQ consumer, logging |
 | v1.0.0 | 📋 Planned | Full pipeline, NIS 2 audit validated |
 
 Current branch: `develop` — active development.
@@ -125,7 +125,7 @@ Once core services show `healthy`, the Wazuh Dashboard is available at
 In full mode, Shuffle Frontend is available at `http://localhost:3001`.
 
 > The AI triage pipeline (RabbitMQ → TinyLlama → Mistral → Shuffle SOAR)
-is under active development and will be available from v0.3.0.
+is now available starting with v0.3.0.
 
 ## Developer Setup
 
