@@ -21,6 +21,10 @@ from aegis.middleware.models import AegisReport
 logger = logging.getLogger(__name__)
 
 
+class SoarDeliveryError(RuntimeError):
+    """Raised when report delivery to Shuffle fails after retries."""
+
+
 class ShuffleClient:
     """Async HTTP client for Shuffle SOAR webhook delivery."""
 
@@ -56,16 +60,19 @@ class ShuffleClient:
             report: Complete AegisReport to send.
 
         Returns:
-            bool: True if sent successfully, False if all retries failed.
+            bool: True if sent successfully.
+
+        Raises:
+            SoarDeliveryError: If serialization fails or all retries are exhausted.
         """
         logger.debug(f"Sending report {report.alert_id} to Shuffle SOAR")
 
         # Serialize report to JSON (custom encoder for UUID)
         try:
             payload = json.loads(report.model_dump_json())  # Pydantic handles UUID serialization
-        except Exception as e:
-            logger.error(f"Failed to serialize report: {e}")
-            return False
+        except Exception as exc:
+            logger.error(f"Failed to serialize report: {exc}")
+            raise SoarDeliveryError("Failed to serialize AegisReport for SOAR delivery") from exc
 
         backoff_times = [1.0, 2.0, 4.0]  # Exponential backoff
 
@@ -91,16 +98,20 @@ class ShuffleClient:
                 )
                 return True
 
-            except (TimeoutError, httpx.HTTPError) as e:
-                logger.warning(f"[Shuffle] Attempt {attempt}/3 - ERROR: {type(e).__name__}: {e}")
+            except (TimeoutError, httpx.TimeoutException, httpx.HTTPError) as exc:
+                logger.warning(
+                    f"[Shuffle] Attempt {attempt}/3 - ERROR: {type(exc).__name__}: {exc}"
+                )
                 if attempt < len(backoff_times):
                     logger.debug(f"Retrying in {backoff}s...")
                     await asyncio.sleep(backoff)
-                continue
+                    continue
+                raise SoarDeliveryError(
+                    f"Failed to send report {report.alert_id} after 3 attempts"
+                ) from exc
 
-        # All retries exhausted
         logger.error(f"[Shuffle] Failed to send report {report.alert_id} after 3 attempts")
-        return False
+        raise SoarDeliveryError(f"Failed to send report {report.alert_id} after 3 attempts")
 
     async def close(self) -> None:
         """Close HTTP client connection."""
