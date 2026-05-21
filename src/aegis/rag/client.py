@@ -1,18 +1,10 @@
-"""
-ChromaDB client for AEGIS RAG (asset context enrichment).
+"""Async ChromaDB client for AEGIS RAG asset enrichment."""
 
-Provides interface to ChromaDB vector database for similarity search.
-Stores and retrieves:
-- Asset metadata (name, description, criticality tier)
-- UEBA baselines (normal behavior, anomalies, associated users)
-- Incident history (similar past incidents)
-
-On-premise deployment: ChromaDB runs locally, no cloud calls.
-Zero external API calls.
-"""
-
+import json
 import logging
-from typing import Any
+from typing import Any, Literal, cast
+
+import httpx
 
 from aegis.middleware.models import RagContext, UEBAMetrics
 
@@ -20,177 +12,252 @@ logger = logging.getLogger(__name__)
 
 
 class ChromaDBClient:
-    """Client for ChromaDB vector similarity search (asset enrichment)."""
+    """Client for ChromaDB metadata lookup by asset identifier."""
 
-    def __init__(self, host: str = "localhost", port: int = 8000) -> None:
-        """
-        Initialize ChromaDB client.
+    def __init__(self, host: str = "localhost", port: int = 8000, timeout: float = 5.0) -> None:
+        """Initialize ChromaDB async HTTP client configuration.
 
         Args:
-            host: ChromaDB server host (default: localhost for Docker).
-            port: ChromaDB server port (default: 8000).
+            host: ChromaDB server host.
+            port: ChromaDB server port.
+            timeout: Request timeout in seconds.
         """
         self.host = host
         self.port = port
-        # Note: In production, this would initialize a Chroma client:
-        # self.client = chromadb.HttpClient(host=host, port=port)
-        # For now, we stub the implementation.
+        self.timeout = timeout
+        self.base_url = f"http://{host}:{port}"
+        self._client: httpx.AsyncClient | None = None
+        self._collection_name = "aegis_assets"
+        self._collection_id: str | None = None
         logger.info(f"ChromaDB client initialized: {host}:{port}")
 
     async def __aenter__(self) -> "ChromaDBClient":
-        """Context manager entry."""
+        """Create the underlying HTTP client and ensure collection exists."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        await self._ensure_collection()
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Context manager exit."""
+        """Close HTTP resources at context exit."""
         await self.close()
 
+    async def _ensure_collection(self) -> str:
+        """Ensure `aegis_assets` exists and cache its collection id."""
+        if self._collection_id is not None:
+            return self._collection_id
+        if self._client is None:
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+
+        response = await self._client.post(
+            "/api/v1/collections",
+            json={"name": self._collection_name, "get_or_create": True},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or "id" not in payload:
+            raise ValueError("Invalid ChromaDB collection response")
+        self._collection_id = str(payload["id"])
+        return self._collection_id
+
     async def get_asset_context(self, asset_identifier: str) -> RagContext:
-        """
-        Retrieve enriched context for an asset by name or IP.
-
-        Searches ChromaDB collection 'aegis_assets' for similarity match.
-        Returns asset metadata + UEBA baseline + incident history.
-
-        If asset not found, returns default context (tier2, "Unknown asset")
-        with baseline UEBA indicating no historical data.
+        """Retrieve enriched context for an asset using metadata lookup by `asset_id`.
 
         Args:
-            asset_identifier: Asset name or IP address to search for.
+            asset_identifier: Asset identifier (hostname, id, or IP).
 
         Returns:
-            RagContext: Enriched business context (asset + UEBA + incidents).
+            RagContext: Enriched context, or tier2 fallback when unavailable.
         """
-        logger.debug(f"Searching ChromaDB for asset: {asset_identifier}")
+        try:
+            collection_id = await self._ensure_collection()
+            if self._client is None:
+                self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
 
-        # TODO: Implement actual Chroma similarity search
-        # query_results = self.client.get(
-        #     collection_name="aegis_assets",
-        #     query_embeddings=embed_identifier(asset_identifier),
-        #     n_results=1
-        # )
+            response = await self._client.post(
+                f"/api/v1/collections/{collection_id}/get",
+                json={
+                    "where": {"asset_id": asset_identifier},
+                    "limit": 1,
+                    "include": ["metadatas"],
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            metadatas = payload.get("metadatas", []) if isinstance(payload, dict) else []
 
-        # For now, return a default context (unknown asset)
-        # This will be replaced with actual ChromaDB search in v0.3
-        default_context = self._create_default_context(asset_identifier)
-        logger.info(
-            f"Asset '{asset_identifier}' not found in ChromaDB. "
-            f"Returning default context (tier2, unknown)"
+            if not metadatas:
+                logger.warning(
+                    f"asset_id={asset_identifier} not found in ChromaDB, defaulting to tier2"
+                )
+                return self._create_default_context(asset_identifier)
+
+            first_metadata = metadatas[0] if isinstance(metadatas, list) and metadatas else None
+            metadata = (
+                first_metadata[0] if isinstance(first_metadata, list) and first_metadata else None
+            )
+            if not isinstance(metadata, dict):
+                logger.warning(
+                    f"asset_id={asset_identifier} not found in ChromaDB, defaulting to tier2"
+                )
+                return self._create_default_context(asset_identifier)
+
+            return self._context_from_metadata(asset_identifier, cast(dict[str, Any], metadata))
+
+        except (httpx.TimeoutException, TimeoutError):
+            logger.warning(
+                f"asset_id={asset_identifier} not found in ChromaDB, defaulting to tier2"
+            )
+            return self._create_default_context(asset_identifier)
+        except Exception:
+            logger.exception("Unexpected ChromaDB error while fetching asset context")
+            return self._create_default_context(asset_identifier)
+
+    def _context_from_metadata(self, asset_identifier: str, metadata: dict[str, Any]) -> RagContext:
+        """Convert Chroma metadata into the local RagContext model."""
+        raw_criticality = str(metadata.get("criticality_tier", "tier2"))
+        if raw_criticality not in {"tier0", "tier1", "tier2"}:
+            raw_criticality = "tier2"
+        criticality: Literal["tier0", "tier1", "tier2"] = cast(
+            Literal["tier0", "tier1", "tier2"], raw_criticality
         )
-        return default_context
+
+        ueba = self._extract_ueba(metadata)
+        similar_incidents = metadata.get("similar_incidents", [])
+        if not isinstance(similar_incidents, list):
+            similar_incidents = []
+
+        return RagContext(
+            asset_name=str(metadata.get("asset_name", asset_identifier)),
+            asset_criticality=criticality,
+            asset_description=str(
+                metadata.get("asset_description", "Unknown asset - no metadata found in ChromaDB")
+            ),
+            similar_incidents=[str(item) for item in similar_incidents],
+            ueba=ueba,
+        )
+
+    def _extract_ueba(self, metadata: dict[str, Any]) -> UEBAMetrics:
+        """Build UEBA metrics from metadata, with neutral defaults when unavailable."""
+        raw_ueba = metadata.get("ueba")
+        if isinstance(raw_ueba, str):
+            try:
+                raw_ueba = json.loads(raw_ueba)
+            except json.JSONDecodeError:
+                raw_ueba = None
+
+        if not isinstance(raw_ueba, dict):
+            logger.info("UEBA metrics missing in ChromaDB entry; using neutral defaults")
+            return UEBAMetrics(
+                baseline_description="No historical baseline available. Asset is new or untracked.",
+                associated_users=[],
+                normal_activity_window="Unknown",
+                recent_anomalies=[],
+                anomaly_score=0.0,
+            )
+
+        associated_users = raw_ueba.get("associated_users", [])
+        recent_anomalies = raw_ueba.get("recent_anomalies", [])
+        anomaly_score = raw_ueba.get("anomaly_score", 0.0)
+        if not isinstance(associated_users, list):
+            associated_users = []
+        if not isinstance(recent_anomalies, list):
+            recent_anomalies = []
+
+        return UEBAMetrics(
+            baseline_description=str(
+                raw_ueba.get(
+                    "baseline_description",
+                    "No historical baseline available. Asset is new or untracked.",
+                )
+            ),
+            associated_users=[str(item) for item in associated_users],
+            normal_activity_window=str(raw_ueba.get("normal_activity_window", "Unknown")),
+            recent_anomalies=[str(item) for item in recent_anomalies],
+            anomaly_score=float(anomaly_score),
+        )
 
     @staticmethod
     def _create_default_context(asset_identifier: str) -> RagContext:
-        """
-        Create a default RagContext for unknown assets.
-
-        Used as fallback when asset is not found in ChromaDB.
-        Indicates tier2 (standard) criticality with no historical data.
-
-        Args:
-            asset_identifier: Asset name or IP.
-
-        Returns:
-            RagContext: Default context with baseline UEBA.
-        """
+        """Create a tier2 fallback context for unknown assets."""
         return RagContext(
             asset_name=asset_identifier,
             asset_criticality="tier2",
             asset_description="Unknown asset - no metadata found in ChromaDB",
             similar_incidents=[],
             ueba=UEBAMetrics(
-                baseline_description=(
-                    "No historical baseline available. Asset is new or untracked."
-                ),
+                baseline_description="No historical baseline available. Asset is new or untracked.",
                 associated_users=[],
-                normal_activity_window="Unknown - assume 24/7",
+                normal_activity_window="Unknown",
                 recent_anomalies=[],
-                anomaly_score=0.5,  # Neutral: no data
+                anomaly_score=0.0,
             ),
         )
 
     async def get_asset_context_by_ip(self, ip_address: str) -> RagContext:
-        """
-        Retrieve asset context by IP address (convenience method).
-
-        Args:
-            ip_address: IPv4 or IPv6 address to search for.
-
-        Returns:
-            RagContext: Enriched business context for the asset.
-        """
+        """Retrieve asset context by IP address."""
         return await self.get_asset_context(ip_address)
 
     async def get_asset_context_by_name(self, asset_name: str) -> RagContext:
-        """
-        Retrieve asset context by asset name (convenience method).
-
-        Args:
-            asset_name: Asset hostname or identifier.
-
-        Returns:
-            RagContext: Enriched business context for the asset.
-        """
+        """Retrieve asset context by asset name."""
         return await self.get_asset_context(asset_name)
 
     async def index_asset(self, context: RagContext) -> bool:
-        """
-        Add or update asset in ChromaDB.
-
-        Called after human approval of remediation or periodic sync
-        from asset management database (CMDB).
+        """Upsert an asset into ChromaDB metadata collection.
 
         Args:
-            context: RagContext with full asset metadata.
+            context: Rag context to persist.
 
         Returns:
-            bool: True if indexed successfully, False otherwise.
+            bool: True when request succeeds.
         """
-        logger.debug(f"Indexing asset: {context.asset_name}")
+        try:
+            collection_id = await self._ensure_collection()
+            if self._client is None:
+                self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
 
-        # TODO: Implement actual Chroma index operation
-        # vector = embed_asset_context(context)
-        # self.client.upsert(
-        #     collection_name="aegis_assets",
-        #     embeddings=[vector],
-        #     metadatas=[context.model_dump()],
-        #     ids=[context.asset_name]
-        # )
-
-        logger.info(f"Asset '{context.asset_name}' indexed in ChromaDB")
-        return True
+            payload = {
+                "ids": [context.asset_name],
+                "metadatas": [
+                    {
+                        "asset_id": context.asset_name,
+                        "asset_name": context.asset_name,
+                        "criticality_tier": context.asset_criticality,
+                        "asset_description": context.asset_description,
+                        "similar_incidents": context.similar_incidents,
+                        "ueba": context.ueba.model_dump(),
+                    }
+                ],
+                "documents": [context.asset_description],
+            }
+            response = await self._client.post(
+                f"/api/v1/collections/{collection_id}/upsert",
+                json=payload,
+            )
+            response.raise_for_status()
+            return True
+        except Exception:
+            logger.exception("Failed to index asset into ChromaDB")
+            return False
 
     async def get_similar_incidents(self, asset_name: str, limit: int = 5) -> list[dict[str, Any]]:
-        """
-        Retrieve similar past incidents for an asset.
+        """Return similar incidents for an asset.
 
-        Searches incident history for patterns matching the current asset
-        or similar assets in the same tier.
+        This minimal implementation keeps backward compatibility for callers.
 
         Args:
-            asset_name: Asset name to find incidents for.
-            limit: Maximum number of incidents to return (default: 5).
+            asset_name: Asset name to query.
+            limit: Maximum incident count.
 
         Returns:
-            list: List of incident records with details.
+            list[dict[str, Any]]: Incident summaries.
         """
-        logger.debug(f"Searching similar incidents for '{asset_name}' (limit: {limit})")
-
-        # TODO: Implement actual incident search from ChromaDB
-        # results = self.client.query(
-        #     collection_name="aegis_incidents",
-        #     query_texts=[asset_name],
-        #     n_results=limit
-        # )
-
-        # For now, return empty list
-        logger.info(
-            f"No historical incidents found for '{asset_name}' "
-            f"(or ChromaDB not yet implemented)"
-        )
+        _ = asset_name
+        _ = limit
         return []
 
     async def close(self) -> None:
-        """Close ChromaDB client connection."""
-        # TODO: Close Chroma HTTP connection if needed
-        logger.debug("ChromaDB client closed")
+        """Close ChromaDB HTTP resources."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
