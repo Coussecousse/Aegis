@@ -42,7 +42,9 @@
       "auto_delete": false,
       "arguments": {
         "x-message-ttl": 300000,
-        "x-max-length": 10000
+        "x-max-length": 10000,
+        "x-dead-letter-exchange": "aegis.alerts",
+        "x-dead-letter-routing-key": "alert.dead"
       }
     }
   ],
