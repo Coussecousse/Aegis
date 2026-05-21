@@ -52,14 +52,26 @@ class ChromaDBClient:
         if self._client is None:
             chromadb_module = _get_chromadb_module()
             async_http_client = getattr(chromadb_module, "AsyncHttpClient", None)
-            if async_http_client is None:
-                raise RuntimeError("chromadb.AsyncHttpClient is unavailable")
-            self._client = await async_http_client(
-                host=self.host,
-                port=self.port,
+            if async_http_client is not None:
+                self._client = await self._maybe_await(
+                    async_http_client(
+                        host=self.host,
+                        port=self.port,
+                    )
+                )
+            else:
+                http_client = getattr(chromadb_module, "HttpClient", None)
+                if http_client is None:
+                    raise RuntimeError("No compatible ChromaDB HTTP client is available")
+                self._client = http_client(
+                    host=self.host,
+                    port=self.port,
+                )
+
+        self._collection = await self._maybe_await(
+            self._client.get_or_create_collection(
+                name=self._collection_name,
             )
-        self._collection = await self._client.get_or_create_collection(
-            name=self._collection_name,
         )
         return self._collection
 
@@ -74,7 +86,7 @@ class ChromaDBClient:
         """
         try:
             collection = await self._ensure_collection()
-            results = await collection.get(ids=[asset_identifier])
+            results = await self._maybe_await(collection.get(ids=[asset_identifier]))
             metadatas = results.get("metadatas", []) if isinstance(results, dict) else []
 
             if not metadatas:
@@ -215,22 +227,24 @@ class ChromaDBClient:
         """
         try:
             collection = await self._ensure_collection()
-            await collection.upsert(
-                ids=[context.asset_name],
-                metadatas=[
-                    {
-                        "asset_name": context.asset_name,
-                        "asset_criticality": context.asset_criticality,
-                        "asset_description": context.asset_description,
-                        "similar_incidents": json.dumps(context.similar_incidents),
-                        "baseline_description": context.ueba.baseline_description,
-                        "associated_users": json.dumps(context.ueba.associated_users),
-                        "normal_activity_window": context.ueba.normal_activity_window,
-                        "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
-                        "anomaly_score": str(context.ueba.anomaly_score),
-                    }
-                ],
-                documents=[context.asset_description],
+            await self._maybe_await(
+                collection.upsert(
+                    ids=[context.asset_name],
+                    metadatas=[
+                        {
+                            "asset_name": context.asset_name,
+                            "asset_criticality": context.asset_criticality,
+                            "asset_description": context.asset_description,
+                            "similar_incidents": json.dumps(context.similar_incidents),
+                            "baseline_description": context.ueba.baseline_description,
+                            "associated_users": json.dumps(context.ueba.associated_users),
+                            "normal_activity_window": context.ueba.normal_activity_window,
+                            "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                            "anomaly_score": str(context.ueba.anomaly_score),
+                        }
+                    ],
+                    documents=[context.asset_description],
+                )
             )
             return True
         except Exception:
@@ -258,8 +272,13 @@ class ChromaDBClient:
         if self._client is not None:
             close_method = getattr(self._client, "close", None)
             if callable(close_method):
-                result = close_method()
-                if hasattr(result, "__await__"):
-                    await result
+                await self._maybe_await(close_method())
             self._client = None
             self._collection = None
+
+    @staticmethod
+    async def _maybe_await(value: Any) -> Any:
+        """Await the value when needed, otherwise return it unchanged."""
+        if hasattr(value, "__await__"):
+            return await value
+        return value
