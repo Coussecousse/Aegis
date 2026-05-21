@@ -1,0 +1,178 @@
+"""Unit tests for ChromaDBClient lookups and fallbacks."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+import pytest
+
+from aegis.middleware.models import LlmResponse, RagContext, SlmResponse, UEBAMetrics
+from aegis.middleware.risk_scorer import compute_risk_score
+from aegis.rag import client as rag_client_module
+from aegis.rag.client import ChromaDBClient
+
+
+class _FakeChromaModule:
+    def __init__(self, collection: _FakeCollection) -> None:
+        self._collection = collection
+        self.AsyncHttpClient = self._build_async_http_client()
+
+    def _build_async_http_client(self) -> Any:
+        async def _async_http_client(host: str, port: int) -> _FakeChromaClient:
+            _ = host
+            _ = port
+            return _FakeChromaClient(self._collection)
+
+        return _async_http_client
+
+
+class _FakeCollection:
+    def __init__(self, get_result: Any = None, get_error: Exception | None = None) -> None:
+        self._get_result = get_result
+        self._get_error = get_error
+        self.upsert_calls = 0
+
+    async def get(self, ids: list[str]) -> dict[str, Any]:
+        _ = ids
+        if self._get_error is not None:
+            raise self._get_error
+        return self._get_result if isinstance(self._get_result, dict) else {"metadatas": []}
+
+    async def upsert(self, **kwargs: Any) -> None:
+        _ = kwargs
+        self.upsert_calls += 1
+
+
+class _FakeChromaClient:
+    def __init__(self, collection: _FakeCollection) -> None:
+        self._collection = collection
+
+    async def get_or_create_collection(self, name: str) -> _FakeCollection:
+        _ = name
+        return self._collection
+
+
+@pytest.mark.asyncio
+async def test_get_asset_context_found_tier0(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _FakeCollection(
+        get_result={
+            "metadatas": [
+                {
+                    "asset_name": "DC-01",
+                    "asset_criticality": "tier0",
+                    "asset_description": "Domain controller",
+                    "similar_incidents": '["inc-1"]',
+                    "baseline_description": "Business hours",
+                    "associated_users": '["domain_admin"]',
+                    "normal_activity_window": "08:00-18:00",
+                    "recent_anomalies": '["night login"]',
+                    "anomaly_score": "0.2",
+                }
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModule(collection),
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        context = await client.get_asset_context("dc-01")
+
+    assert context.asset_criticality == "tier0"
+
+
+@pytest.mark.asyncio
+async def test_get_asset_context_not_found_fallback_tier2(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    collection = _FakeCollection(get_result={"metadatas": []})
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModule(collection),
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        context = await client.get_asset_context("missing-asset")
+
+    assert context.asset_criticality == "tier2"
+    assert "not found in ChromaDB" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_asset_context_timeout_returns_tier2(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _FakeCollection(get_error=httpx.TimeoutException("timeout"))
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModule(collection),
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        context = await client.get_asset_context("dc-01")
+
+    assert context.asset_criticality == "tier2"
+
+
+@pytest.mark.asyncio
+async def test_index_asset_calls_upsert_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _FakeCollection(get_result={"metadatas": []})
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModule(collection),
+    )
+
+    context = RagContext(
+        asset_name="dc-01",
+        asset_criticality="tier0",
+        asset_description="Domain controller",
+        similar_incidents=["inc-1"],
+        ueba=UEBAMetrics(
+            baseline_description="Business hours",
+            associated_users=["domain_admin"],
+            normal_activity_window="08:00-18:00",
+            recent_anomalies=[],
+            anomaly_score=0.1,
+        ),
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        result = await client.index_asset(context)
+
+    assert result is True
+    assert collection.upsert_calls == 1
+
+
+def test_tier0_mapping_yields_criticality_multiplier_1_5() -> None:
+    slm = SlmResponse(
+        is_suspect=True,
+        confidence=0.9,
+        behavior_category="lateral_movement",
+        reasoning_short="Suspicious",
+        raw_probabilities={"suspect": 0.9, "benign": 0.1},
+    )
+    llm = LlmResponse(
+        attack_confirmed=True,
+        confidence=0.91,
+        attack_type="Lateral movement",
+        severity="critical",
+        affected_asset="dc-01",
+        asset_criticality="tier0",
+        plain_language_summary="Threat confirmed",
+        recommended_action="Isolate",
+        requires_human_validation=True,
+        raw_probabilities={"attack": 0.91, "false_positive": 0.09},
+    )
+
+    score = compute_risk_score(slm=slm, llm=llm, rule_level=10, asset_criticality="tier0")
+
+    assert score.score_breakdown["criticality_multiplier"] == 1.5
