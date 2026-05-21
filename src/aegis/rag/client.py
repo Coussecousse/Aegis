@@ -1,5 +1,6 @@
 """Async ChromaDB client for AEGIS RAG asset enrichment."""
 
+import importlib
 import json
 import logging
 from typing import Any, Literal, cast
@@ -9,6 +10,11 @@ import httpx
 from aegis.middleware.models import RagContext, UEBAMetrics
 
 logger = logging.getLogger(__name__)
+
+
+def _get_chromadb_module() -> Any:
+    """Load chromadb lazily to avoid import-time failures on unsupported platforms."""
+    return importlib.import_module("chromadb")
 
 
 class ChromaDBClient:
@@ -25,16 +31,13 @@ class ChromaDBClient:
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.base_url = f"http://{host}:{port}"
-        self._client: httpx.AsyncClient | None = None
+        self._client: Any | None = None
+        self._collection: Any | None = None
         self._collection_name = "aegis_assets"
-        self._collection_id: str | None = None
         logger.info(f"ChromaDB client initialized: {host}:{port}")
 
     async def __aenter__(self) -> "ChromaDBClient":
-        """Create the underlying HTTP client and ensure collection exists."""
-        if self._client is None:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        """Create async ChromaDB client and ensure collection exists."""
         await self._ensure_collection()
         return self
 
@@ -42,23 +45,23 @@ class ChromaDBClient:
         """Close HTTP resources at context exit."""
         await self.close()
 
-    async def _ensure_collection(self) -> str:
-        """Ensure `aegis_assets` exists and cache its collection id."""
-        if self._collection_id is not None:
-            return self._collection_id
+    async def _ensure_collection(self) -> Any:
+        """Ensure `aegis_assets` collection exists and cache it."""
+        if self._collection is not None:
+            return self._collection
         if self._client is None:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
-
-        response = await self._client.post(
-            "/api/v1/collections",
-            json={"name": self._collection_name, "get_or_create": True},
+            chromadb_module = _get_chromadb_module()
+            async_http_client = getattr(chromadb_module, "AsyncHttpClient", None)
+            if async_http_client is None:
+                raise RuntimeError("chromadb.AsyncHttpClient is unavailable")
+            self._client = await async_http_client(
+                host=self.host,
+                port=self.port,
+            )
+        self._collection = await self._client.get_or_create_collection(
+            name=self._collection_name,
         )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict) or "id" not in payload:
-            raise ValueError("Invalid ChromaDB collection response")
-        self._collection_id = str(payload["id"])
-        return self._collection_id
+        return self._collection
 
     async def get_asset_context(self, asset_identifier: str) -> RagContext:
         """Retrieve enriched context for an asset using metadata lookup by `asset_id`.
@@ -70,35 +73,20 @@ class ChromaDBClient:
             RagContext: Enriched context, or tier2 fallback when unavailable.
         """
         try:
-            collection_id = await self._ensure_collection()
-            if self._client is None:
-                self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
-
-            response = await self._client.post(
-                f"/api/v1/collections/{collection_id}/get",
-                json={
-                    "where": {"asset_id": asset_identifier},
-                    "limit": 1,
-                    "include": ["metadatas"],
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            metadatas = payload.get("metadatas", []) if isinstance(payload, dict) else []
+            collection = await self._ensure_collection()
+            results = await collection.get(ids=[asset_identifier])
+            metadatas = results.get("metadatas", []) if isinstance(results, dict) else []
 
             if not metadatas:
                 logger.warning(
-                    f"asset_id={asset_identifier} not found in ChromaDB, defaulting to tier2"
+                    f"asset_id={asset_identifier!r} not found in ChromaDB, defaulting to tier2"
                 )
                 return self._create_default_context(asset_identifier)
 
-            first_metadata = metadatas[0] if isinstance(metadatas, list) and metadatas else None
-            metadata = (
-                first_metadata[0] if isinstance(first_metadata, list) and first_metadata else None
-            )
+            metadata = metadatas[0] if isinstance(metadatas, list) and metadatas else None
             if not isinstance(metadata, dict):
                 logger.warning(
-                    f"asset_id={asset_identifier} not found in ChromaDB, defaulting to tier2"
+                    f"asset_id={asset_identifier!r} not found in ChromaDB, defaulting to tier2"
                 )
                 return self._create_default_context(asset_identifier)
 
@@ -106,7 +94,7 @@ class ChromaDBClient:
 
         except (httpx.TimeoutException, TimeoutError):
             logger.warning(
-                f"asset_id={asset_identifier} not found in ChromaDB, defaulting to tier2"
+                f"asset_id={asset_identifier!r} not found in ChromaDB, defaulting to tier2"
             )
             return self._create_default_context(asset_identifier)
         except Exception:
@@ -115,67 +103,81 @@ class ChromaDBClient:
 
     def _context_from_metadata(self, asset_identifier: str, metadata: dict[str, Any]) -> RagContext:
         """Convert Chroma metadata into the local RagContext model."""
-        raw_criticality = str(metadata.get("criticality_tier", "tier2"))
+        raw_criticality = str(metadata.get("asset_criticality", "tier2"))
         if raw_criticality not in {"tier0", "tier1", "tier2"}:
             raw_criticality = "tier2"
         criticality: Literal["tier0", "tier1", "tier2"] = cast(
             Literal["tier0", "tier1", "tier2"], raw_criticality
         )
 
-        ueba = self._extract_ueba(metadata)
-        similar_incidents = metadata.get("similar_incidents", [])
-        if not isinstance(similar_incidents, list):
+        similar_incidents_raw = metadata.get("similar_incidents", "[]")
+        similar_incidents: list[str]
+        if isinstance(similar_incidents_raw, str):
+            try:
+                parsed_incidents = json.loads(similar_incidents_raw)
+                similar_incidents = [str(item) for item in parsed_incidents]
+            except json.JSONDecodeError:
+                similar_incidents = []
+        elif isinstance(similar_incidents_raw, list):
+            similar_incidents = [str(item) for item in similar_incidents_raw]
+        else:
             similar_incidents = []
 
         return RagContext(
             asset_name=str(metadata.get("asset_name", asset_identifier)),
             asset_criticality=criticality,
-            asset_description=str(
-                metadata.get("asset_description", "Unknown asset - no metadata found in ChromaDB")
-            ),
-            similar_incidents=[str(item) for item in similar_incidents],
-            ueba=ueba,
+            asset_description=str(metadata.get("asset_description", "")),
+            similar_incidents=similar_incidents,
+            ueba=self._extract_ueba(metadata),
         )
 
     def _extract_ueba(self, metadata: dict[str, Any]) -> UEBAMetrics:
         """Build UEBA metrics from metadata, with neutral defaults when unavailable."""
-        raw_ueba = metadata.get("ueba")
-        if isinstance(raw_ueba, str):
-            try:
-                raw_ueba = json.loads(raw_ueba)
-            except json.JSONDecodeError:
-                raw_ueba = None
+        associated_users_raw = metadata.get("associated_users", "[]")
+        recent_anomalies_raw = metadata.get("recent_anomalies", "[]")
 
-        if not isinstance(raw_ueba, dict):
+        associated_users = self._parse_string_list(associated_users_raw)
+        recent_anomalies = self._parse_string_list(recent_anomalies_raw)
+        anomaly_score_raw = metadata.get("anomaly_score", 0.0)
+        baseline_description = str(metadata.get("baseline_description", "No baseline"))
+        normal_activity_window = str(metadata.get("normal_activity_window", "Unknown"))
+
+        if (
+            "baseline_description" not in metadata
+            and "associated_users" not in metadata
+            and "normal_activity_window" not in metadata
+            and "recent_anomalies" not in metadata
+            and "anomaly_score" not in metadata
+        ):
             logger.info("UEBA metrics missing in ChromaDB entry; using neutral defaults")
-            return UEBAMetrics(
-                baseline_description="No historical baseline available. Asset is new or untracked.",
-                associated_users=[],
-                normal_activity_window="Unknown",
-                recent_anomalies=[],
-                anomaly_score=0.0,
-            )
-
-        associated_users = raw_ueba.get("associated_users", [])
-        recent_anomalies = raw_ueba.get("recent_anomalies", [])
-        anomaly_score = raw_ueba.get("anomaly_score", 0.0)
-        if not isinstance(associated_users, list):
+            baseline_description = "No baseline"
             associated_users = []
-        if not isinstance(recent_anomalies, list):
+            normal_activity_window = "Unknown"
             recent_anomalies = []
+            anomaly_score_raw = 0.0
 
         return UEBAMetrics(
-            baseline_description=str(
-                raw_ueba.get(
-                    "baseline_description",
-                    "No historical baseline available. Asset is new or untracked.",
-                )
-            ),
-            associated_users=[str(item) for item in associated_users],
-            normal_activity_window=str(raw_ueba.get("normal_activity_window", "Unknown")),
-            recent_anomalies=[str(item) for item in recent_anomalies],
-            anomaly_score=float(anomaly_score),
+            baseline_description=baseline_description,
+            associated_users=associated_users,
+            normal_activity_window=normal_activity_window,
+            recent_anomalies=recent_anomalies,
+            anomaly_score=float(anomaly_score_raw),
         )
+
+    @staticmethod
+    def _parse_string_list(value: Any) -> list[str]:
+        """Parse metadata list values from JSON strings or native list objects."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return []
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return []
 
     @staticmethod
     def _create_default_context(asset_identifier: str) -> RagContext:
@@ -186,7 +188,7 @@ class ChromaDBClient:
             asset_description="Unknown asset - no metadata found in ChromaDB",
             similar_incidents=[],
             ueba=UEBAMetrics(
-                baseline_description="No historical baseline available. Asset is new or untracked.",
+                baseline_description="No baseline",
                 associated_users=[],
                 normal_activity_window="Unknown",
                 recent_anomalies=[],
@@ -212,29 +214,24 @@ class ChromaDBClient:
             bool: True when request succeeds.
         """
         try:
-            collection_id = await self._ensure_collection()
-            if self._client is None:
-                self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
-
-            payload = {
-                "ids": [context.asset_name],
-                "metadatas": [
+            collection = await self._ensure_collection()
+            await collection.upsert(
+                ids=[context.asset_name],
+                metadatas=[
                     {
-                        "asset_id": context.asset_name,
                         "asset_name": context.asset_name,
-                        "criticality_tier": context.asset_criticality,
+                        "asset_criticality": context.asset_criticality,
                         "asset_description": context.asset_description,
-                        "similar_incidents": context.similar_incidents,
-                        "ueba": context.ueba.model_dump(),
+                        "similar_incidents": json.dumps(context.similar_incidents),
+                        "baseline_description": context.ueba.baseline_description,
+                        "associated_users": json.dumps(context.ueba.associated_users),
+                        "normal_activity_window": context.ueba.normal_activity_window,
+                        "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                        "anomaly_score": str(context.ueba.anomaly_score),
                     }
                 ],
-                "documents": [context.asset_description],
-            }
-            response = await self._client.post(
-                f"/api/v1/collections/{collection_id}/upsert",
-                json=payload,
+                documents=[context.asset_description],
             )
-            response.raise_for_status()
             return True
         except Exception:
             logger.exception("Failed to index asset into ChromaDB")
@@ -257,7 +254,12 @@ class ChromaDBClient:
         return []
 
     async def close(self) -> None:
-        """Close ChromaDB HTTP resources."""
+        """Close ChromaDB async resources when supported by the client implementation."""
         if self._client is not None:
-            await self._client.aclose()
+            close_method = getattr(self._client, "close", None)
+            if callable(close_method):
+                result = close_method()
+                if hasattr(result, "__await__"):
+                    await result
             self._client = None
+            self._collection = None
