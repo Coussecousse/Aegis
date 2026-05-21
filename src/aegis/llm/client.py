@@ -110,7 +110,7 @@ class OllamaClient:
                 if isinstance(response_data, dict):
                     response_text = str(response_data.get("response", ""))
 
-                parsed_json = self._parse_json_response(response_text)
+                    parsed_json = self._extract_json(response_text)
                 parsed_json["confidence"] = self._normalize_confidence(
                     parsed_json.get("confidence")
                 )
@@ -120,7 +120,7 @@ class OllamaClient:
                 )
                 return parsed_json
 
-            except (TimeoutError, httpx.TimeoutException) as exc:
+            except httpx.TimeoutException as exc:
                 logger.warning(
                     f"[{model}] Attempt {attempt}/3 - TIMEOUT ({timeout}s). "
                     f"Retrying in {backoff}s..."
@@ -128,7 +128,7 @@ class OllamaClient:
                 if attempt < len(backoff_times):
                     await asyncio.sleep(backoff)
                     continue
-                raise TimeoutError(f"[{model}] Timeout after 3 attempts") from exc
+                raise exc
 
             except httpx.HTTPError as exc:
                 logger.warning(
@@ -138,19 +138,19 @@ class OllamaClient:
                 if attempt < len(backoff_times):
                     await asyncio.sleep(backoff)
                     continue
-                raise OllamaClientError(f"[{model}] Request failed after 3 attempts") from exc
+                raise exc
 
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 logger.warning(
                     f"[{model}] Malformed JSON response. "
                     f"Using defensive fallback: {type(exc).__name__}"
                 )
-                return self._defensive_fallback(model)
+                raise ValueError(f"Response is not valid JSON: {response_text[:100]}") from exc
 
         raise RuntimeError("Unreachable retry loop termination")
 
     @staticmethod
-    def _parse_json_response(response_text: str) -> dict[str, Any]:
+    def _extract_json(response_text: str) -> dict[str, Any]:
         """
         Extract and parse JSON from model response.
 
@@ -210,31 +210,6 @@ class OllamaClient:
         except (TypeError, ValueError):
             return 0.0
         return min(1.0, max(0.0, confidence))
-
-    @staticmethod
-    def _defensive_fallback(model: str) -> dict[str, Any]:
-        """Return a safe fallback payload that can be validated by pydantic models."""
-        if model == "tinyllama-aegis":
-            return {
-                "is_suspect": False,
-                "confidence": 0.0,
-                "behavior_category": "normal",
-                "reasoning_short": "Fallback response due to malformed model output",
-                "raw_probabilities": {"suspect": 0.0, "benign": 1.0},
-            }
-
-        return {
-            "attack_confirmed": False,
-            "confidence": 0.0,
-            "attack_type": "unknown",
-            "severity": "low",
-            "affected_asset": "unknown",
-            "asset_criticality": "tier2",
-            "plain_language_summary": "Fallback response due to malformed model output",
-            "recommended_action": "Manual investigation required",
-            "requires_human_validation": True,
-            "raw_probabilities": {"attack": 0.0, "false_positive": 1.0},
-        }
 
     async def close(self) -> None:
         """Close HTTP client connection."""
