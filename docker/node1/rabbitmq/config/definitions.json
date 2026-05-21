@@ -34,6 +34,16 @@
       "durable": true,
       "auto_delete": false,
       "arguments": {}
+    },
+    {
+      "name": "identity.sync",
+      "vhost": "aegis",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 300000,
+        "x-max-length": 10000
+      }
     }
   ],
   "exchanges": [
@@ -62,6 +72,14 @@
       "destination": "aegis.deadletter",
       "destination_type": "queue",
       "routing_key": "alert.dead",
+      "arguments": {}
+    },
+    {
+      "source": "aegis.alerts",
+      "vhost": "aegis",
+      "destination": "identity.sync",
+      "destination_type": "queue",
+      "routing_key": "identity.sync",
       "arguments": {}
     }
   ]
