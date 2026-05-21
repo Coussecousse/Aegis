@@ -111,14 +111,16 @@ class OllamaClient:
                     response_text = str(response_data.get("response", ""))
 
                     parsed_json = self._extract_json(response_text)
-                parsed_json["confidence"] = self._normalize_confidence(
-                    parsed_json.get("confidence")
-                )
-                logger.info(
-                    f"[{model}] Success on attempt {attempt}: confidence "
-                    f"{parsed_json.get('confidence', 'N/A')}"
-                )
-                return parsed_json
+                    parsed_json["confidence"] = self._normalize_confidence(
+                        parsed_json.get("confidence")
+                    )
+                    logger.info(
+                        f"[{model}] Success on attempt {attempt}: confidence "
+                        f"{parsed_json.get('confidence', 'N/A')}"
+                    )
+                    return parsed_json
+
+                raise ValueError(f"Unexpected Ollama response format: {type(response_data)}")
 
             except httpx.TimeoutException as exc:
                 logger.warning(
