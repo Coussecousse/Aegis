@@ -145,7 +145,7 @@ class UEBAMetrics(BaseModel):
     """User and Entity Behavior Analytics: behavioral baselines and anomalies."""
 
     baseline_description: str = Field(
-        ..., description="Description of the expected normal behavior for this asset"
+        ..., description="Description of the expected normal behavior of this asset"
     )
     associated_users: list[str] = Field(
         default_factory=list,
