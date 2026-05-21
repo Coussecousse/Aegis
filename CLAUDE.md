@@ -165,17 +165,24 @@ aegis/
 │   ├── unit/
 │   └── integration/
 └── docs/
-    └── adr/                    # Architecture Decision Records (MADR format)
+    ├── adr/                    # Architecture Decision Records (MADR format)
+    ├── modelfiles/             # Official Ollama Modelfiles for Raspberry Pi deployment
+    └── raspberrypi-ollama-setup.md  # Raspberry Pi Ollama deployment guide
 ```
 
 ---
 
 ## Versioning
 
-- **Current version**: `v0.1.0`
+- **Current version**: `v0.2.0`
 - **Scheme**: SemVer (`MAJOR.MINOR.PATCH`)
 - PATCH bump: automatic on every merged PR via CI
 - MINOR bump: human decision when a new feature is complete
+- **v0.2.0 release criteria (done):**
+  - Complete middleware pipeline (consumer → SLM → RAG → LLM → risk_scorer → SOAR)
+  - Unit tests: models + risk_scorer (coverage ≥ 80%)
+  - 18 custom Wazuh rules (local_rules.xml)
+  - CI: lint + typecheck + test + security-scan + critical-gate
 - **v1.0.0 release criteria**:
   1. Successful NIS 2 / AI Act audit
   2. Demonstrated MTTT (Mean Time To Triage) reduction ≥ 40 % in a real environment

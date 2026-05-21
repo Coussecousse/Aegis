@@ -80,19 +80,15 @@ tinyllama     ...             637 MB   ...
 
 ## Step 3: Deploy Custom Modelfiles
 
-Les Modelfiles officiels sont versionnés dans docs/modelfiles/. Copie-les sur le Raspberry Pi et déploie-les :
+Copy the official Modelfiles to the Raspberry Pi by hand, then deploy them.
 
 ```bash
-# Depuis Node 1, copier les Modelfiles vers le Raspberry Pi
-scp docs/modelfiles/Modelfile.slm-tinyllama kika@10.0.0.1:~/Modelfile.slm
-scp docs/modelfiles/Modelfile.llm-mistral kika@10.0.0.1:~/Modelfile.llm
-
-# Sur le Raspberry Pi
+# On the Raspberry Pi
 ollama create tinyllama-aegis -f ~/Modelfile.slm
 ollama create mistral-aegis -f ~/Modelfile.llm
 ```
 
-Vérifie ensuite que les deux modèles sont présents :
+Verify that both models are present:
 
 ```bash
 ollama list
