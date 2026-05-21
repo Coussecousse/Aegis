@@ -450,7 +450,7 @@ class TestAegisReport:
         )
 
         assert report.alert_id == alert_id
-        assert report.pipeline_version == "0.2.0"
+        assert report.pipeline_version == "0.3.0"
         assert report.processing_time_ms == 3240
 
     def test_aegis_report_llm_can_be_none(self) -> None:

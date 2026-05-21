@@ -357,7 +357,7 @@ async def process_log(
         report = AegisReport(
             alert_id=report_id,
             timestamp=pipeline_start,
-            pipeline_version="0.2.0",
+            pipeline_version="0.3.0",
             source_log=log,
             slm_analysis=slm,
             llm_analysis=llm,
