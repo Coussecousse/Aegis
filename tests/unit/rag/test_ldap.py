@@ -1,0 +1,92 @@
+"""Unit tests for the LDAPS identity connector."""
+
+from __future__ import annotations
+
+import pytest
+
+from aegis.rag.ldap import LdapConfig, LdapConnector
+
+
+class _FakeLdapAttribute:
+    def __init__(self, value: str | None = None, values: list[str] | None = None) -> None:
+        self.value = value
+        self.values = values or []
+
+
+class _FakeLdapEntry:
+    def __init__(self) -> None:
+        self.distinguishedName = _FakeLdapAttribute(
+            value="CN=admin-user,CN=Users,DC=aerotech,DC=local"
+        )
+        self.sAMAccountName = _FakeLdapAttribute(value="admin-user")
+        self.memberOf = _FakeLdapAttribute(
+            values=["CN=Domain Admins,CN=Users,DC=aerotech,DC=local"]
+        )
+
+
+class _FakeLdapConnection:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        _ = args
+        _ = kwargs
+        self.entries: list[object] = [_FakeLdapEntry()]
+
+    def search(self, **kwargs: object) -> bool:
+        _ = kwargs
+        return True
+
+    def unbind(self) -> None:
+        return None
+
+
+class _FakeLdapServer:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        _ = args
+        _ = kwargs
+
+
+class _FakeLdapModule:
+    Server = _FakeLdapServer
+    Connection = _FakeLdapConnection
+
+
+@pytest.mark.asyncio
+async def test_fetch_identity_context_maps_tier0(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = LdapConfig(
+        host="ldap.local",
+        base_dn="DC=aerotech,DC=local",
+        bind_dn="CN=svc_ldap,OU=Svc,DC=aerotech,DC=local",
+        bind_password="unused-in-test",  # pragma: allowlist secret
+    )
+    connector = LdapConnector(config)
+
+    monkeypatch.setattr("aegis.rag.ldap.importlib.import_module", lambda _: _FakeLdapModule())
+
+    context = await connector.fetch_identity_context("dc-01")
+
+    assert context.asset_criticality == "tier0"
+    assert context.asset_name == "admin-user"
+    assert "CN=Domain Admins,CN=Users,DC=aerotech,DC=local" in context.ueba.recent_anomalies
+
+
+@pytest.mark.asyncio
+async def test_fetch_identity_context_timeout_raises_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = LdapConfig(
+        host="ldap.local",
+        base_dn="DC=aerotech,DC=local",
+        bind_dn="CN=svc_ldap,OU=Svc,DC=aerotech,DC=local",
+        bind_password="unused-in-test",  # pragma: allowlist secret
+        timeout=5.0,
+    )
+    connector = LdapConnector(config)
+
+    async def _fake_to_thread(*args: object, **kwargs: object) -> object:
+        _ = args
+        _ = kwargs
+        raise TimeoutError
+
+    monkeypatch.setattr("aegis.rag.ldap.asyncio.to_thread", _fake_to_thread)
+
+    with pytest.raises(ConnectionError):
+        await connector.fetch_identity_context("dc-01")

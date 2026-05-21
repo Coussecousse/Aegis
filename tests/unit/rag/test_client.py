@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from aegis.middleware.models import LlmResponse, RagContext, SlmResponse, UEBAMetrics
 from aegis.middleware.risk_scorer import compute_risk_score
 from aegis.rag import client as rag_client_module
+from aegis.rag.base import BaseIdentityConnector
 from aegis.rag.client import ChromaDBClient
 
 
@@ -32,6 +34,7 @@ class _FakeCollection:
         self._get_result = get_result
         self._get_error = get_error
         self.upsert_calls = 0
+        self.last_upsert_kwargs: dict[str, Any] = {}
 
     async def get(self, ids: list[str]) -> dict[str, Any]:
         _ = ids
@@ -40,8 +43,16 @@ class _FakeCollection:
         return self._get_result if isinstance(self._get_result, dict) else {"metadatas": []}
 
     async def upsert(self, **kwargs: Any) -> None:
-        _ = kwargs
+        self.last_upsert_kwargs = kwargs
         self.upsert_calls += 1
+
+
+class _FakeIdentityConnector(BaseIdentityConnector):
+    def __init__(self, context: RagContext) -> None:
+        self.fetch_identity_context_mock: AsyncMock = AsyncMock(return_value=context)
+
+    async def fetch_identity_context(self, asset_identifier: str) -> RagContext:
+        return await self.fetch_identity_context_mock(asset_identifier)
 
 
 class _FakeChromaClient:
@@ -150,6 +161,70 @@ async def test_index_asset_calls_upsert_once(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result is True
     assert collection.upsert_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_asset_identity_calls_connector_then_upsert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection = _FakeCollection(get_result={"metadatas": []})
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModule(collection),
+    )
+
+    context = RagContext(
+        asset_name="dc-01",
+        asset_criticality="tier0",
+        asset_description="Domain controller identity context",
+        similar_incidents=[],
+        ueba=UEBAMetrics(
+            baseline_description="Identity baseline",
+            associated_users=["admin-user"],
+            normal_activity_window="Unknown",
+            recent_anomalies=["CN=Domain Admins,CN=Users,DC=aerotech,DC=local"],
+            anomaly_score=1.0,
+        ),
+    )
+    connector = _FakeIdentityConnector(context)
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        result = await client.sync_asset_identity("dc-01", connector)
+
+    assert result is True
+    connector.fetch_identity_context_mock.assert_awaited_once_with("dc-01")
+    assert collection.upsert_calls == 1
+    assert collection.last_upsert_kwargs["ids"] == ["dc-01"]
+    metadata = collection.last_upsert_kwargs["metadatas"][0]
+    assert metadata["asset_criticality"] == "tier0"
+
+
+@pytest.mark.asyncio
+async def test_sync_asset_identity_connection_error_applies_tier2_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    collection = _FakeCollection(get_result={"metadatas": []})
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModule(collection),
+    )
+
+    connector = AsyncMock(spec=BaseIdentityConnector)
+    connector.fetch_identity_context.side_effect = ConnectionError("ldap timeout")
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        result = await client.sync_asset_identity("missing-asset", connector)
+
+    assert result is True
+    assert collection.upsert_calls == 1
+    metadata = collection.last_upsert_kwargs["metadatas"][0]
+    assert metadata["asset_criticality"] == "tier2"
+    assert "Failed to sync asset missing-asset, fallback data applied" in caplog.text
 
 
 def test_tier0_mapping_yields_criticality_multiplier_1_5() -> None:
