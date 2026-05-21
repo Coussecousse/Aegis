@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 18 custom Wazuh detection rules covering 5 threat categories: lateral
   movement, ransomware staging, data exfiltration, insider threats, supply chain
   compromise (rule IDs 100001–100042, `docker/node1/wazuh/config/local_rules.xml`).
-- SOC operator runbook for Wazuh custom rules (French,
+- SOC operator runbook for Wazuh custom rules,
   `docs/runbooks/wazuh-rules.md`).
 - ADR-001: decision record documenting why Wazuh rules are versioned in Git
   rather than edited through the UI (`docs/adr/001-wazuh-custom-rules-versioned.md`).

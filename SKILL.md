@@ -34,14 +34,14 @@ Wazuh 4.7 → RabbitMQ 3.12 (queue: aegis.triage)
   → Prometheus + Grafana
 ```
 
-### Node 2 — Raspberry Pi 5 (16 Go RAM, Debian 13)
+### Node 2 — Raspberry Pi 5 (16 GB RAM, Debian 13)
 ```
 WireGuard IP : 10.0.0.1  (accessible via tunnel wg-aegis only)
 SSH          : ssh kika@10.0.0.1
 Firewall     : nftables strict (WireGuard UDP 51820 only outbound)
 Ollama ARM   : OLLAMA_HOST=0.0.0.0:11434 (systemd override required)
   tinyllama-aegis  → SLM triage  (TinyLlama 1.1B, timeout 10s)
-  mistral-aegis    → LLM analyse (Mistral 7B Q4, timeout 45s)
+  mistral-aegis    → LLM analysis (Mistral 7B Q4, timeout 45s)
 ```
 
 ### Developer environment

@@ -8,7 +8,7 @@
 
 ## Prerequisites
 
-- Raspberry Pi 5 (16 Go RAM)
+- Raspberry Pi 5 (16 GB RAM)
 - Ollama installed (https://ollama.ai)
 - WireGuard configured and active on the Raspberry Pi
 - Network connectivity verified: `ping 10.0.0.1` from the main AEGIS node
@@ -48,7 +48,7 @@ Verify:
 curl http://10.0.0.1:11434/api/tags
 ```
 
-Note sécurité : Le firewall nftables du Raspberry Pi autorise uniquement WireGuard UDP 51820 en sortie. Ollama n'est accessible que depuis le tunnel (10.0.0.0/24). Aucun accès internet direct.
+Security note: The Raspberry Pi nftables firewall allows only WireGuard UDP 51820 outbound. Ollama is reachable only from the tunnel (10.0.0.0/24). There is no direct Internet access.
 
 ---
 
@@ -202,7 +202,7 @@ Adjust `PARAMETER num_predict` in the Modelfile:
 
 ## Performance Notes
 
-- **Raspberry Pi 5 (16 Go RAM)**: SLM ~2-4 alertes/sec | LLM ~0.5-1 alerte/sec
+- **Raspberry Pi 5 (16 GB RAM)**: SLM ~2-4 alerts/sec | LLM ~0.5-1 alert/sec
 - **Temperature tuning**: Lower temp = faster, deterministic | Higher temp = more nuanced
 - **Quantization**: Mistral Q4 is optimized for Raspberry Pi memory constraints
 
