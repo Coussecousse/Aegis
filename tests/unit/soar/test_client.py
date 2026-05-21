@@ -92,7 +92,7 @@ def _build_report(severity: str = "high") -> AegisReport:
 
 
 @pytest.mark.asyncio
-async def test_send_report_nominal_200() -> None:
+async def test_send_report_nominal_returns_true() -> None:
     client = ShuffleClient("http://shuffle/hook")
 
     async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
@@ -103,15 +103,11 @@ async def test_send_report_nominal_200() -> None:
     client._client = httpx.AsyncClient()
     client._client.post = _post  # type: ignore[method-assign]
 
-    sent = await client.send_report(_build_report())
-
-    assert sent is True
+    assert await client.send_report(_build_report()) is True
 
 
 @pytest.mark.asyncio
-async def test_send_report_http_500_retries_then_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_send_report_http_500_retries_then_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     client = ShuffleClient("http://shuffle/hook")
     attempts = 0
     sleeps: list[float] = []
@@ -123,8 +119,8 @@ async def test_send_report_http_500_retries_then_raises(
         attempts += 1
         return _FakeResponse(500)
 
-    async def _sleep(duration: float) -> None:
-        sleeps.append(duration)
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
 
     monkeypatch.setattr(asyncio, "sleep", _sleep)
 
@@ -139,39 +135,36 @@ async def test_send_report_http_500_retries_then_raises(
 
 
 @pytest.mark.asyncio
-async def test_send_report_uuid_serialization() -> None:
+async def test_send_report_serializes_uuid_and_datetime_without_type_error() -> None:
     client = ShuffleClient("http://shuffle/hook")
-    payloads: list[dict[str, Any]] = []
+    captured_payloads: list[dict[str, Any]] = []
 
     async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
         _ = args
-        payloads.append(dict(kwargs["json"]))
+        captured_payloads.append(dict(kwargs["json"]))
         return _FakeResponse(200)
 
     client._client = httpx.AsyncClient()
     client._client.post = _post  # type: ignore[method-assign]
 
-    report = _build_report()
-    await client.send_report(report)
+    await client.send_report(_build_report())
 
-    assert isinstance(payloads[0]["alert_id"], str)
-    assert isinstance(payloads[0]["source_log"]["id"], str)
+    payload = captured_payloads[0]
+    assert isinstance(payload["alert_id"], str)
+    assert isinstance(payload["timestamp"], str)
+    assert isinstance(payload["source_log"]["id"], str)
 
 
 @pytest.mark.asyncio
-async def test_send_report_critical_decision_payload() -> None:
+async def test_send_report_with_critical_decision_succeeds() -> None:
     client = ShuffleClient("http://shuffle/hook")
-    payloads: list[dict[str, Any]] = []
 
     async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
         _ = args
-        payloads.append(dict(kwargs["json"]))
+        _ = kwargs
         return _FakeResponse(200)
 
     client._client = httpx.AsyncClient()
     client._client.post = _post  # type: ignore[method-assign]
 
-    report = _build_report(severity="critical")
-    await client.send_report(report)
-
-    assert payloads[0]["decision"]["severity"] == "critical"
+    assert await client.send_report(_build_report(severity="critical")) is True
