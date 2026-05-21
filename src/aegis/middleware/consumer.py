@@ -101,10 +101,12 @@ class RabbitMQConsumer:
         logger.info(f"Connecting to RabbitMQ: {self.rabbitmq_host}:" f"{self.rabbitmq_port}")
 
         # Build connection URL
+        encoded_user = quote(self.rabbitmq_user or "", safe="")
         safe_password = self.rabbitmq_password or ""
+        encoded_password = quote(safe_password, safe="")
         encoded_vhost = quote(self.rabbitmq_vhost or "/", safe="")
         connection_url = (
-            f"amqp://{self.rabbitmq_user}:{safe_password}"
+            f"amqp://{encoded_user}:{encoded_password}"
             f"@{self.rabbitmq_host}:{self.rabbitmq_port}/{encoded_vhost}"
         )
 

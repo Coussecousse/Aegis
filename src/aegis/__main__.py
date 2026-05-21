@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -45,6 +46,10 @@ def setup_logging() -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level_int)
 
+    # Avoid duplicate handlers if setup_logging is called more than once.
+    if root_logger.handlers:
+        root_logger.handlers.clear()
+
     # Console handler (stdout)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level_int)
@@ -56,8 +61,11 @@ def setup_logging() -> None:
     root_logger.addHandler(console_handler)
 
     # File handler (rotating, max 10MB per file, 5 files)
+    log_file = Path(os.getenv("LOG_FILE", str(Path.home() / "aegis.log")))
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
     file_handler = RotatingFileHandler(
-        filename="aegis.log",
+        filename=str(log_file),
         maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=5,
     )
@@ -80,7 +88,7 @@ async def main() -> None:
     Runs indefinitely until interrupted (SIGTERM/SIGINT).
     """
     logging.info("=" * 80)
-    logging.info("AEGIS v0.2.0 - Sovereign SOC Orchestrator (On-Premise AI)")
+    logging.info("AEGIS v0.3.0 - Sovereign SOC Orchestrator (On-Premise AI)")
     logging.info("=" * 80)
 
     # Load configuration from environment
