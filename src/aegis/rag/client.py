@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 import httpx
 
 from aegis.middleware.models import RagContext, UEBAMetrics
+from aegis.rag.base import BaseIdentityConnector
 
 logger = logging.getLogger(__name__)
 
@@ -52,21 +53,14 @@ class ChromaDBClient:
         if self._client is None:
             chromadb_module = _get_chromadb_module()
             async_http_client = getattr(chromadb_module, "AsyncHttpClient", None)
-            if async_http_client is not None:
-                self._client = await self._maybe_await(
-                    async_http_client(
-                        host=self.host,
-                        port=self.port,
-                    )
-                )
-            else:
-                http_client = getattr(chromadb_module, "HttpClient", None)
-                if http_client is None:
-                    raise RuntimeError("No compatible ChromaDB HTTP client is available")
-                self._client = http_client(
+            if async_http_client is None:
+                raise RuntimeError("chromadb.AsyncHttpClient is unavailable")
+            self._client = await self._maybe_await(
+                async_http_client(
                     host=self.host,
                     port=self.port,
                 )
+            )
 
         self._collection = await self._maybe_await(
             self._client.get_or_create_collection(
@@ -249,6 +243,52 @@ class ChromaDBClient:
             return True
         except Exception:
             logger.exception("Failed to index asset into ChromaDB")
+            return False
+
+    async def sync_asset_identity(self, asset_id: str, connector: BaseIdentityConnector) -> bool:
+        """Synchronize identity context into ChromaDB via ETL.
+
+        Args:
+            asset_id: Identifier of the target asset.
+            connector: Identity connector implementation used for extraction.
+
+        Returns:
+            bool: True when synchronization succeeds.
+        """
+        try:
+            context = await connector.fetch_identity_context(asset_id)
+        except ConnectionError:
+            logger.warning(f"Failed to sync asset {asset_id}, fallback data applied")
+            context = self._create_default_context(asset_id)
+        except Exception:
+            logger.exception("Unexpected identity connector failure during sync")
+            context = self._create_default_context(asset_id)
+
+        try:
+            collection = await self._ensure_collection()
+            await self._maybe_await(
+                collection.upsert(
+                    ids=[asset_id],
+                    metadatas=[
+                        {
+                            "asset_name": context.asset_name,
+                            "asset_criticality": context.asset_criticality,
+                            "asset_description": context.asset_description,
+                            "identity_asset_id": asset_id,
+                            "similar_incidents": json.dumps(context.similar_incidents),
+                            "baseline_description": context.ueba.baseline_description,
+                            "associated_users": json.dumps(context.ueba.associated_users),
+                            "normal_activity_window": context.ueba.normal_activity_window,
+                            "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                            "anomaly_score": str(context.ueba.anomaly_score),
+                        }
+                    ],
+                    documents=[context.asset_description],
+                )
+            )
+            return True
+        except Exception:
+            logger.exception("Failed to sync identity context into ChromaDB")
             return False
 
     async def get_similar_incidents(self, asset_name: str, limit: int = 5) -> list[dict[str, Any]]:
