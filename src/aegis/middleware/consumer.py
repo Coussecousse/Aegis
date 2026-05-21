@@ -135,34 +135,37 @@ class RabbitMQConsumer:
         Runs indefinitely until interrupted (SIGTERM/SIGINT).
         Processes each message through the AEGIS pipeline.
         """
+        ollama_client = OllamaClient(self.ollama_base_url)
+        chromadb_client = ChromaDBClient(self.chromadb_host, self.chromadb_port)
+        shuffle_client = ShuffleClient(self.shuffle_webhook_url)
+
         try:
-            await self.connect()
-
-            # Initialize clients
-            ollama_client = OllamaClient(self.ollama_base_url)
-            chromadb_client = ChromaDBClient(self.chromadb_host, self.chromadb_port)
-            shuffle_client = ShuffleClient(self.shuffle_webhook_url)
-
-            logger.info("Starting message consumer loop...")
-
-            # Consume messages
-            if self.queue is None:
-                raise RuntimeError("Queue not initialized")
-
             async with ollama_client, chromadb_client, shuffle_client:
-                async with self.queue.iterator() as queue_iter:
-                    async for message in queue_iter:
-                        await self._handle_message(
-                            message,
-                            ollama_client,
-                            chromadb_client,
-                            shuffle_client,
-                        )
+                while True:
+                    try:
+                        await self.connect()
 
-        except asyncio.CancelledError:
-            logger.info("Consumer cancelled. Shutting down...")
-        except Exception as e:
-            logger.error(f"Consumer error: {e}")
+                        logger.info("Starting message consumer loop...")
+                        if self.queue is None:
+                            raise RuntimeError("Queue not initialized")
+
+                        async with self.queue.iterator() as queue_iter:
+                            async for message in queue_iter:
+                                await self._handle_message(
+                                    message,
+                                    ollama_client,
+                                    chromadb_client,
+                                    shuffle_client,
+                                )
+
+                    except asyncio.CancelledError:
+                        logger.info("Consumer cancelled. Shutting down...")
+                        raise
+                    except Exception as e:
+                        logger.warning(f"Consumer loop interrupted, reconnecting: {e}")
+                        await self.close()
+                        await asyncio.sleep(2.0)
+
         finally:
             await self.close()
 
@@ -277,8 +280,8 @@ class RabbitMQConsumer:
                     }
                 )
             )
-            # NACK and requeue: let another consumer try
-            await message.nack(requeue=True)
+            # NACK without requeue to avoid poison-message loops.
+            await message.nack(requeue=False)
 
     async def close(self) -> None:
         """Close RabbitMQ connection."""

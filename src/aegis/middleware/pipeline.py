@@ -412,21 +412,9 @@ async def process_log(
                     }
                 )
             )
-        else:
-            logger.warning(
-                json.dumps(
-                    {
-                        "event": "soar_send_failed",
-                        "alert_id": str(report.alert_id),
-                        "note": "Report generated but SOAR delivery failed. "
-                        "Manual intervention may be needed.",
-                    }
-                )
-            )
-            # Don't fail the pipeline; report is still available for human review
 
     except Exception as e:
-        logger.warning(
+        logger.error(
             json.dumps(
                 {
                     "event": "soar_send_error",
@@ -434,7 +422,7 @@ async def process_log(
                 }
             )
         )
-        # Don't fail the pipeline; report is still valid
+        raise
 
     # ========================================================================
     # STEP 9: Return complete report for human review
