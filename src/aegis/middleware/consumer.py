@@ -280,8 +280,8 @@ class RabbitMQConsumer:
                     }
                 )
             )
-            # NACK without requeue to avoid poison-message loops.
-            await message.nack(requeue=False)
+            # NACK and requeue so a transient failure can be retried.
+            await message.nack(requeue=True)
 
     async def close(self) -> None:
         """Close RabbitMQ connection."""

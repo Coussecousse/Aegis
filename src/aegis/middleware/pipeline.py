@@ -414,7 +414,7 @@ async def process_log(
             )
 
     except Exception as e:
-        logger.error(
+        logger.warning(
             json.dumps(
                 {
                     "event": "soar_send_error",
@@ -422,7 +422,7 @@ async def process_log(
                 }
             )
         )
-        raise
+        # Report remains available for human review even if SOAR delivery fails.
 
     # ========================================================================
     # STEP 9: Return complete report for human review
