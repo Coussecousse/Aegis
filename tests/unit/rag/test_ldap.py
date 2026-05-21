@@ -56,6 +56,7 @@ async def test_fetch_identity_context_maps_tier0(monkeypatch: pytest.MonkeyPatch
         base_dn="DC=aerotech,DC=local",
         bind_dn="CN=svc_ldap,OU=Svc,DC=aerotech,DC=local",
         bind_password="unused-in-test",  # pragma: allowlist secret
+        tier0_group_dn="CN=Domain Admins,CN=Users,DC=aerotech,DC=local",
     )
     connector = LdapConnector(config)
 
@@ -90,3 +91,42 @@ async def test_fetch_identity_context_timeout_raises_connection_error(
 
     with pytest.raises(ConnectionError):
         await connector.fetch_identity_context("dc-01")
+
+
+@pytest.mark.asyncio
+async def test_fetch_identity_context_tier0_custom_dn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tier0 detection works when tier0_group_dn uses a non-default CN=Builtin container."""
+
+    class _FakeEntryBuiltin:
+        def __init__(self) -> None:
+            self.distinguishedName = _FakeLdapAttribute(  # noqa: N815
+                value="CN=admin,CN=Users,DC=corp,DC=example"
+            )
+            self.sAMAccountName = _FakeLdapAttribute(value="admin")  # noqa: N815
+            self.memberOf = _FakeLdapAttribute(  # noqa: N815
+                values=["CN=Domain Admins,CN=Builtin,DC=corp,DC=example"]
+            )
+
+    class _FakeConnectionBuiltin(_FakeLdapConnection):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            self.entries = [_FakeEntryBuiltin()]
+
+    class _FakeModuleBuiltin:
+        Server = _FakeLdapServer
+        Connection = _FakeConnectionBuiltin
+
+    config = LdapConfig(
+        host="ldap.corp",
+        base_dn="DC=corp,DC=example",
+        bind_dn="CN=svc,OU=Svc,DC=corp,DC=example",
+        bind_password="unused-in-test",  # pragma: allowlist secret
+        tier0_group_dn="CN=Domain Admins,CN=Builtin,DC=corp,DC=example",
+    )
+    connector = LdapConnector(config)
+
+    monkeypatch.setattr("aegis.rag.ldap.importlib.import_module", lambda _: _FakeModuleBuiltin())
+
+    context = await connector.fetch_identity_context("dc-01")
+
+    assert context.asset_criticality == "tier0"
