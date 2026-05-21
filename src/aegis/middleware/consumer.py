@@ -213,13 +213,13 @@ class RabbitMQConsumer:
             )
 
             # v0.3 SCALING NOTE:
-            # Traitement séquentiel : un message à la fois (design v0.2).
-            # Ollama sérialise les inférences côté Raspberry Pi de toute façon.
-            # Pour monter en charge (v0.3) si volume > 100 alertes/min :
-            #   1. channel.set_qos(prefetch_count=3) — buffériser 3 msgs côté client
-            #   2. asyncio.Semaphore(1) sur les appels Ollama — sérialiser l'inférence
-            #   3. Précharger ChromaDB pour msg N+1 pendant l'inférence du msg N
-            # Monitorer via Prometheus : aegis_pipeline_duration_seconds p95 > 30s
+            # Sequential processing: one message at a time (v0.2 design).
+            # Ollama already serializes inference on the Raspberry Pi.
+            # To scale up (v0.3) if volume exceeds 100 alerts/min:
+            #   1. channel.set_qos(prefetch_count=3) — buffer 3 messages on the client side
+            #   2. asyncio.Semaphore(1) on Ollama calls — serialize inference
+            #   3. Preload ChromaDB for msg N+1 during msg N inference
+            # Monitor with Prometheus: aegis_pipeline_duration_seconds p95 > 30s
 
             # Process through pipeline
             report = await process_log(

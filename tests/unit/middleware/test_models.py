@@ -113,7 +113,7 @@ class TestSlmResponse:
             is_suspect=True,
             confidence=0.87,
             behavior_category="lateral_movement",
-            reasoning_short="Exécution anormale de net.exe",
+            reasoning_short="Abnormal execution of net.exe",
             raw_probabilities={"suspect": 0.87, "benign": 0.13},
         )
         assert response.is_suspect is True
@@ -184,12 +184,12 @@ class TestLlmResponse:
         response = LlmResponse(
             attack_confirmed=True,
             confidence=0.91,
-            attack_type="Mouvement latéral via SMB",
+            attack_type="Lateral movement via SMB",
             severity="critical",
             affected_asset="DC-AEROTECH-01",
             asset_criticality="tier0",
-            plain_language_summary="Un attaquant semble se déplacer latéralement.",
-            recommended_action="Isoler immédiatement le poste source.",
+            plain_language_summary="An attacker appears to be moving laterally.",
+            recommended_action="Immediately isolate the source workstation.",
             requires_human_validation=True,
             raw_probabilities={"attack": 0.91, "false_positive": 0.09},
         )

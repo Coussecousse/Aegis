@@ -22,18 +22,18 @@ from pydantic import BaseModel, ConfigDict, Field
 class WazuhLog(BaseModel):
     """Raw log received from Wazuh via RabbitMQ."""
 
-    id: UUID = Field(..., description="Identifiant unique du log (UUID v4)")
-    timestamp: datetime = Field(..., description="Horodatage ISO8601")
-    source_agent: str = Field(..., description="Nom de la machine qui a généré l'alerte")
-    source_ip: str = Field(..., description="Adresse IP source (IPv4 ou IPv6)")
-    rule_id: int = Field(..., ge=1, description="Identifiant de la règle Wazuh")
-    rule_level: int = Field(..., ge=0, le=15, description="Niveau de sévérité Wazuh (0-15)")
-    rule_description: str = Field(..., description="Description lisible de la règle")
-    full_log: str = Field(..., description="Contenu complet du log ou événement")
+    id: UUID = Field(..., description="Unique log identifier (UUID v4)")
+    timestamp: datetime = Field(..., description="ISO 8601 timestamp")
+    source_agent: str = Field(..., description="Name of the machine that generated the alert")
+    source_ip: str = Field(..., description="Source IP address (IPv4 or IPv6)")
+    rule_id: int = Field(..., ge=1, description="Wazuh rule identifier")
+    rule_level: int = Field(..., ge=0, le=15, description="Wazuh severity level (0-15)")
+    rule_description: str = Field(..., description="Readable rule description")
+    full_log: str = Field(..., description="Full log or event content")
     mitre_technique: str | None = Field(
-        None, description="Technique MITRE ATT&CK associée (ex: T1021)"
+        None, description="Associated MITRE ATT&CK technique (e.g. T1021)"
     )
-    decoder_name: str | None = Field(None, description="Décodeur utilisé (ex: windows-eventlog)")
+    decoder_name: str | None = Field(None, description="Decoder used (e.g. windows-eventlog)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -56,12 +56,12 @@ class WazuhLog(BaseModel):
 class SlmResponse(BaseModel):
     """Response from SLM TinyLlama: quick suspicion analysis."""
 
-    is_suspect: bool = Field(..., description="Le log est-il suspect ?")
+    is_suspect: bool = Field(..., description="Is the log suspicious?")
     confidence: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Confiance du SLM (0.0 à 1.0)",
+        description="SLM confidence (0.0 to 1.0)",
     )
     behavior_category: Literal[
         "lateral_movement",
@@ -71,11 +71,11 @@ class SlmResponse(BaseModel):
         "normal",
     ] = Field(
         ...,
-        description="Catégorie du comportement détecté",
+        description="Detected behavior category",
     )
-    reasoning_short: str = Field(..., description="Justification courte du score (< 200 chars)")
+    reasoning_short: str = Field(..., description="Short scoring rationale (< 200 chars)")
     raw_probabilities: dict[str, float] = Field(
-        ..., description="Probabilités brutes : {'suspect': float, 'benign': float}"
+        ..., description="Raw probabilities: {'suspect': float, 'benign': float}"
     )
 
     model_config = ConfigDict(
@@ -84,7 +84,7 @@ class SlmResponse(BaseModel):
                 "is_suspect": True,
                 "confidence": 0.87,
                 "behavior_category": "lateral_movement",
-                "reasoning_short": "Exécution anormale de net.exe par un compte non-admin",
+                "reasoning_short": "Abnormal net.exe execution by a non-admin account",
                 "raw_probabilities": {"suspect": 0.87, "benign": 0.13},
             }
         }
@@ -94,35 +94,33 @@ class SlmResponse(BaseModel):
 class LlmResponse(BaseModel):
     """Response from LLM Mistral 7B: detailed analysis with context."""
 
-    attack_confirmed: bool = Field(..., description="L'attaque est-elle confirmée par le LLM ?")
+    attack_confirmed: bool = Field(..., description="Is the attack confirmed by the LLM?")
     confidence: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Confiance du LLM (0.0 à 1.0)",
+        description="LLM confidence (0.0 to 1.0)",
     )
     attack_type: str = Field(
-        ..., description="Type d'attaque détecté (ex: Mouvement latéral via SMB)"
+        ..., description="Detected attack type (e.g. lateral movement via SMB)"
     )
     severity: Literal["critical", "high", "medium", "low"] = Field(
         ...,
-        description="Sévérité estimée",
+        description="Estimated severity",
     )
-    affected_asset: str = Field(..., description="Asset affecté (nom ou IP)")
+    affected_asset: str = Field(..., description="Affected asset (name or IP)")
     asset_criticality: Literal["tier0", "tier1", "tier2"] = Field(
         ...,
-        description="Criticité de l'asset ciblé",
+        description="Criticality of the targeted asset",
     )
-    plain_language_summary: str = Field(
-        ..., description="Résumé vulgarisé en langage naturel (< 500 chars)"
-    )
-    recommended_action: str = Field(..., description="Action recommandée pour la remédiation")
+    plain_language_summary: str = Field(..., description="Plain-language summary (< 500 chars)")
+    recommended_action: str = Field(..., description="Recommended remediation action")
     requires_human_validation: bool = Field(
-        ..., description="L'action requiert-elle une validation humaine ?"
+        ..., description="Does the action require human validation?"
     )
     raw_probabilities: dict[str, float] = Field(
         ...,
-        description="Probabilités brutes : {'attack': float, 'false_positive': float}",
+        description="Raw probabilities: {'attack': float, 'false_positive': float}",
     )
 
     model_config = ConfigDict(
@@ -130,12 +128,12 @@ class LlmResponse(BaseModel):
             "example": {
                 "attack_confirmed": True,
                 "confidence": 0.91,
-                "attack_type": "Mouvement latéral via SMB",
+                "attack_type": "Lateral movement via SMB",
                 "severity": "critical",
                 "affected_asset": "DC-AEROTECH-01",
                 "asset_criticality": "tier0",
-                "plain_language_summary": "Un attaquant semble se déplacer latéralement...",
-                "recommended_action": "Isoler immédiatement le poste source",
+                "plain_language_summary": "An attacker appears to be moving laterally...",
+                "recommended_action": "Immediately isolate the source workstation",
                 "requires_human_validation": True,
                 "raw_probabilities": {"attack": 0.91, "false_positive": 0.09},
             }
@@ -151,38 +149,34 @@ class UEBAMetrics(BaseModel):
     )
     associated_users: list[str] = Field(
         default_factory=list,
-        description="Utilisateurs habituellement actifs sur cet asset",
+        description="Users typically active on this asset",
     )
     normal_activity_window: str = Field(
         ...,
-        description="Fenêtre temporelle d'activité normale (ex: '08:00-18:00 weekdays')",
+        description="Normal activity window (e.g. '08:00-18:00 weekdays')",
     )
     recent_anomalies: list[str] = Field(
         default_factory=list,
-        description=(
-            "Anomalies comportementales détectées récemment "
-            "(ex: activité hors heures, utilisateurs inhabituels)"
-        ),
+        description=("Recent behavioral anomalies " "(e.g. out-of-hours activity, unusual users)"),
     )
     anomaly_score: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Score d'anomalie cumulée (0.0=normal, 1.0=très anormal)",
+        description="Cumulative anomaly score (0.0=normal, 1.0=very anomalous)",
     )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "baseline_description": (
-                    "Contrôleur de Domaine : authentifications de 08:00-18:00, "
-                    "~500-1000 requêtes/jour"
+                    "Domain Controller: authentications from 08:00-18:00, " "~500-1000 requests/day"
                 ),
                 "associated_users": ["domain_admin", "svc_replication", "backup_service"],
                 "normal_activity_window": "08:00-18:00 weekdays, 09:00-12:00 weekends",
                 "recent_anomalies": [
-                    "Authentifications à 23:45 (hors heures)",
-                    "Compte d'accès non-admin tente opération LDAP",
+                    "Authentications at 23:45 (out of hours)",
+                    "Non-admin access account attempting LDAP operation",
                 ],
                 "anomaly_score": 0.68,
             }
@@ -242,21 +236,21 @@ class RiskScore(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Score de danger composite (0.0 à 1.0)",
+        description="Composite danger score (0.0 to 1.0)",
     )
     confidence_interval: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Écart absolu entre SLM et LLM",
+        description="Absolute difference between SLM and LLM",
     )
     uncertainty: Literal["low", "medium", "high"] = Field(
         ...,
-        description="Catégorique : low (< 0.1) | medium (< 0.25) | high (>= 0.25)",
+        description="Categorical: low (< 0.1) | medium (< 0.25) | high (>= 0.25)",
     )
     score_breakdown: dict[str, float] = Field(
         ...,
-        description="Décomposition : slm_contribution, llm_contribution, "
+        description="Breakdown: slm_contribution, llm_contribution, "
         "rule_contribution, criticality_multiplier",
     )
 
@@ -282,16 +276,16 @@ class Decision(BaseModel):
 
     severity: Literal["critical", "high", "medium", "low"] = Field(
         ...,
-        description="Sévérité finale",
+        description="Final severity",
     )
     requires_human_validation: bool = Field(
-        ..., description="La décision requiert-elle une validation humaine ?"
+        ..., description="Does the decision require human validation?"
     )
     auto_remediation_allowed: bool = Field(
         ...,
-        description="Remédiation automatique autorisée (toujours False pour v0.2)",
+        description="Automatic remediation allowed (always False in v0.2)",
     )
-    recommended_action: str = Field(..., description="Action recommandée pour la remédiation")
+    recommended_action: str = Field(..., description="Recommended remediation action")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -299,7 +293,7 @@ class Decision(BaseModel):
                 "severity": "critical",
                 "requires_human_validation": True,
                 "auto_remediation_allowed": False,
-                "recommended_action": "Isoler le poste source via Active Directory LDAPS",
+                "recommended_action": "Isolate the source workstation via Active Directory LDAPS",
             }
         }
     )
@@ -308,19 +302,19 @@ class Decision(BaseModel):
 class AegisReport(BaseModel):
     """Complete final report sent to Shuffle SOAR."""
 
-    alert_id: UUID = Field(..., description="UUID unique du rapport d'alerte")
-    timestamp: datetime = Field(..., description="Horodatage du rapport (ISO8601)")
+    alert_id: UUID = Field(..., description="Unique alert report UUID")
+    timestamp: datetime = Field(..., description="Report timestamp (ISO 8601)")
     pipeline_version: str = Field(default="0.2.0", description="Version du pipeline AEGIS")
     source_log: WazuhLog = Field(..., description="Log Wazuh original complet")
-    slm_analysis: SlmResponse = Field(..., description="Réponse du SLM")
+    slm_analysis: SlmResponse = Field(..., description="SLM response")
     llm_analysis: LlmResponse | None = Field(
-        None, description="Réponse du LLM (None si timeout ou erreur)"
+        None, description="LLM response (None on timeout or error)"
     )
-    rag_context: RagContext = Field(..., description="Contexte métier enrichi")
-    risk_score: RiskScore = Field(..., description="Score composite calculé")
-    decision: Decision = Field(..., description="Bloc décisionnel : action & validations")
+    rag_context: RagContext = Field(..., description="Enriched business context")
+    risk_score: RiskScore = Field(..., description="Computed composite score")
+    decision: Decision = Field(..., description="Decision block: action & validations")
     processing_time_ms: int = Field(
-        ..., ge=0, description="Temps de traitement complet en millisecondes"
+        ..., ge=0, description="End-to-end processing time in milliseconds"
     )
 
     model_config = ConfigDict(
@@ -345,18 +339,18 @@ class AegisReport(BaseModel):
                     "is_suspect": True,
                     "confidence": 0.87,
                     "behavior_category": "lateral_movement",
-                    "reasoning_short": "Exécution anormale de net.exe par un compte non-admin",
+                    "reasoning_short": "Abnormal net.exe execution by a non-admin account",
                     "raw_probabilities": {"suspect": 0.87, "benign": 0.13},
                 },
                 "llm_analysis": {
                     "attack_confirmed": True,
                     "confidence": 0.91,
-                    "attack_type": "Mouvement latéral via SMB",
+                    "attack_type": "Lateral movement via SMB",
                     "severity": "critical",
                     "affected_asset": "DC-AEROTECH-01",
                     "asset_criticality": "tier0",
-                    "plain_language_summary": "Un attaquant semble se déplacer latéralement",
-                    "recommended_action": "Isoler immédiatement le poste source",
+                    "plain_language_summary": "An attacker appears to be moving laterally",
+                    "recommended_action": "Immediately isolate the source workstation",
                     "requires_human_validation": True,
                     "raw_probabilities": {"attack": 0.91, "false_positive": 0.09},
                 },
@@ -398,7 +392,9 @@ class AegisReport(BaseModel):
                     "severity": "critical",
                     "requires_human_validation": True,
                     "auto_remediation_allowed": False,
-                    "recommended_action": "Isoler le poste source via Active Directory LDAPS",
+                    "recommended_action": (
+                        "Isolate the source workstation via Active Directory LDAPS"
+                    ),
                 },
                 "processing_time_ms": 3240,
             }

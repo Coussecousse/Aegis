@@ -11,7 +11,7 @@ They are loaded automatically when the Wazuh Manager container starts
 No manual configuration in the Wazuh dashboard is required to create, modify,
 or deploy these rules: the source of truth is the code.
 
-## 2. Comment lire une alerte Wazuh
+## 2. How to Read a Wazuh Alert
 
 When an alert is generated, check the following fields first:
 
@@ -84,7 +84,7 @@ Goal: simulate repeated AD authentication failures and verify the trigger
 `rule.id = 100001`.
 
 ```bash
-# Ouvrir wazuh-logtest dans le conteneur manager
+# Open wazuh-logtest in the manager container
 MSYS_NO_PATHCONV=1 docker exec -it aegis-node1-wazuh.manager-1 /var/ossec/bin/wazuh-logtest
 ```
 

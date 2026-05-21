@@ -11,8 +11,8 @@ Processes a single Wazuh log through the full pipeline:
 7. Send final AegisReport to Shuffle SOAR
 8. Return complete report for human review (human-in-the-loop)
 
-Timing: Chronomètre le temps total en millisecondes.
-Logging: JSON structuré à chaque étape.
+Timing: Measure total time in milliseconds.
+Logging: Structured JSON at each step.
 
 Zero cloud calls. Zero automatic remediation (human validation required).
 """
