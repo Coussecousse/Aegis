@@ -1,6 +1,7 @@
 """Async ChromaDB client for AEGIS RAG asset enrichment."""
 
 import importlib
+import inspect
 import json
 import logging
 from typing import Any, Literal, cast
@@ -319,6 +320,6 @@ class ChromaDBClient:
     @staticmethod
     async def _maybe_await(value: Any) -> Any:
         """Await the value when needed, otherwise return it unchanged."""
-        if hasattr(value, "__await__"):
+        if inspect.isawaitable(value):
             return await value
         return value
