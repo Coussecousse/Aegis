@@ -107,7 +107,62 @@ async def test_handle_message_pipeline_exception_nack_no_requeue(
     )
 
     assert message.nacked is True
-    assert message.requeue is False
+    assert message.requeue is True
+
+
+@pytest.mark.asyncio
+async def test_handle_message_invalid_wazuh_log_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    consumer = RabbitMQConsumer()
+    called = {"value": False}
+
+    async def _fake_process_log(**kwargs: Any) -> None:
+        _ = kwargs
+        called["value"] = True
+
+    monkeypatch.setattr("aegis.middleware.consumer.process_log", _fake_process_log)
+
+    invalid_payload = {
+        "id": str(uuid4()),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source_agent": "WS-01",
+        "source_ip": "10.0.0.10",
+        "rule_id": 1001,
+        "rule_level": 8,
+        "full_log": "cmd.exe /c net user",
+    }
+    message = _FakeMessage(json.dumps(invalid_payload).encode("utf-8"))
+
+    await consumer._handle_message(
+        message,
+        ollama_client=object(),
+        chromadb_client=object(),
+        shuffle_client=object(),
+    )
+
+    assert message.acked is True
+    assert called["value"] is False
+
+
+@pytest.mark.asyncio
+async def test_handle_message_pipeline_discard_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    consumer = RabbitMQConsumer()
+
+    async def _fake_process_log(**kwargs: Any) -> None:
+        _ = kwargs
+        return None
+
+    monkeypatch.setattr("aegis.middleware.consumer.process_log", _fake_process_log)
+
+    message = _FakeMessage(json.dumps(_valid_log_payload()).encode("utf-8"))
+
+    await consumer._handle_message(
+        message,
+        ollama_client=object(),
+        chromadb_client=object(),
+        shuffle_client=object(),
+    )
+
+    assert message.acked is True
 
 
 class _DummyClient:
