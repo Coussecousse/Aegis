@@ -25,6 +25,8 @@ class LdapConfig:
         bind_password: LDAP bind password.
         port: LDAPS port.
         timeout: Connection and query timeout in seconds.
+        tier0_group_dn: Full DN of the group considered Tier 0 (Domain Admins).
+            Override this for environments that differ from the default domain.
     """
 
     host: str
@@ -33,12 +35,11 @@ class LdapConfig:
     bind_password: str
     port: int = 636
     timeout: float = 5.0
+    tier0_group_dn: str = "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
 
 
 class LdapConnector(BaseIdentityConnector):
     """Fetch identity context from Active Directory over LDAPS."""
-
-    _TIER0_GROUP_DN = "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
 
     def __init__(self, config: LdapConfig) -> None:
         """Initialize the LDAPS connector.
@@ -137,7 +138,7 @@ class LdapConnector(BaseIdentityConnector):
         connection.unbind()
 
         criticality: Literal["tier0", "tier2"]
-        criticality = "tier0" if self._is_tier0(groups) else "tier2"
+        criticality = "tier0" if self._is_tier0(groups, self.config.tier0_group_dn) else "tier2"
         description = (
             f"Identity context from LDAPS for {account_name or asset_identifier} "
             f"({distinguished_name or 'unknown DN'})"
@@ -189,18 +190,19 @@ class LdapConnector(BaseIdentityConnector):
             return []
         return [str(item) for item in values]
 
-    @classmethod
-    def _is_tier0(cls, groups: list[str]) -> bool:
+    @staticmethod
+    def _is_tier0(groups: list[str], tier0_group_dn: str) -> bool:
         """Determine whether identity groups map to Tier 0 criticality.
 
         Args:
             groups: LDAP group DN list.
+            tier0_group_dn: Full DN of the Tier 0 reference group.
 
         Returns:
-            True when Domain Admins membership is detected.
+            True when the reference group DN is found in the groups list.
         """
         normalized = {group.lower() for group in groups}
-        return cls._TIER0_GROUP_DN.lower() in normalized
+        return tier0_group_dn.lower() in normalized
 
     @staticmethod
     def _default_context(asset_identifier: str) -> RagContext:

@@ -40,6 +40,7 @@ class RabbitMQIdentityConsumer:
         ldap_bind_dn: str = "",
         ldap_bind_password: str = "",
         ldap_timeout: float = 5.0,
+        ldap_tier0_group_dn: str = "CN=Domain Admins,CN=Users,DC=aerotech,DC=local",
     ) -> None:
         """Initialize dedicated identity synchronization consumer.
 
@@ -57,6 +58,7 @@ class RabbitMQIdentityConsumer:
             ldap_bind_dn: LDAP bind DN for read-only account.
             ldap_bind_password: LDAP bind password.
             ldap_timeout: LDAP timeout in seconds.
+            ldap_tier0_group_dn: Full DN of the Tier 0 group (Domain Admins).
         """
         self.rabbitmq_host = rabbitmq_host
         self.rabbitmq_port = rabbitmq_port
@@ -74,6 +76,7 @@ class RabbitMQIdentityConsumer:
             bind_dn=ldap_bind_dn,
             bind_password=ldap_bind_password,
             timeout=ldap_timeout,
+            tier0_group_dn=ldap_tier0_group_dn,
         )
 
         self.connection: AbstractRobustConnection | None = None
@@ -183,4 +186,7 @@ def build_identity_consumer_from_env() -> RabbitMQIdentityConsumer:
         ldap_bind_dn=os.getenv("LDAP_BIND_DN", ""),
         ldap_bind_password=os.getenv("LDAP_BIND_PASSWORD", ""),
         ldap_timeout=float(os.getenv("LDAP_TIMEOUT", "5.0")),
+        ldap_tier0_group_dn=os.getenv(
+            "LDAP_TIER0_GROUP_DN", "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
+        ),
     )
