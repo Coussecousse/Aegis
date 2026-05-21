@@ -212,6 +212,15 @@ class RabbitMQConsumer:
                 )
             )
 
+            # v0.3 SCALING NOTE:
+            # Traitement séquentiel : un message à la fois (design v0.2).
+            # Ollama sérialise les inférences côté Raspberry Pi de toute façon.
+            # Pour monter en charge (v0.3) si volume > 100 alertes/min :
+            #   1. channel.set_qos(prefetch_count=3) — buffériser 3 msgs côté client
+            #   2. asyncio.Semaphore(1) sur les appels Ollama — sérialiser l'inférence
+            #   3. Précharger ChromaDB pour msg N+1 pendant l'inférence du msg N
+            # Monitorer via Prometheus : aegis_pipeline_duration_seconds p95 > 30s
+
             # Process through pipeline
             report = await process_log(
                 log=log,
@@ -247,9 +256,16 @@ class RabbitMQConsumer:
                 )
 
         except json.JSONDecodeError:
-            logger.warning("Invalid JSON in message body")
-            # NACK and requeue: might be transient parsing error
-            await message.nack(requeue=True)
+            logger.error(
+                json.dumps(
+                    {
+                        "event": "invalid_json_body",
+                        "body_preview": message.body.decode("utf-8", errors="replace")[:200],
+                    }
+                )
+            )
+            # ACK poison pills: malformed JSON cannot be recovered by requeueing.
+            await message.ack()
 
         except Exception as e:
             logger.error(
