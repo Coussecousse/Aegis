@@ -142,7 +142,7 @@ class RabbitMQIdentityConsumer:
             if success:
                 await message.ack()
             else:
-                await message.nack(requeue=True)
+                await message.nack(requeue=False)
 
         except json.JSONDecodeError:
             logger.error("Invalid JSON payload received in identity.sync queue")
@@ -152,7 +152,7 @@ class RabbitMQIdentityConsumer:
             await message.ack()
         except Exception as exc:
             logger.error(f"Unexpected identity sync error: {exc}")
-            await message.nack(requeue=True)
+            await message.nack(requeue=False)
 
     async def close(self) -> None:
         """Close RabbitMQ connection for the identity consumer."""
