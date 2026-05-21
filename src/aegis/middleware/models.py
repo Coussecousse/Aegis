@@ -145,7 +145,7 @@ class UEBAMetrics(BaseModel):
     """User and Entity Behavior Analytics: behavioral baselines and anomalies."""
 
     baseline_description: str = Field(
-        ..., description="Description du comportement normal attendu de cet asset"
+        ..., description="Description of the expected normal behavior for this asset"
     )
     associated_users: list[str] = Field(
         default_factory=list,
@@ -304,8 +304,8 @@ class AegisReport(BaseModel):
 
     alert_id: UUID = Field(..., description="Unique alert report UUID")
     timestamp: datetime = Field(..., description="Report timestamp (ISO 8601)")
-    pipeline_version: str = Field(default="0.2.0", description="Version du pipeline AEGIS")
-    source_log: WazuhLog = Field(..., description="Log Wazuh original complet")
+    pipeline_version: str = Field(default="0.2.0", description="AEGIS pipeline version")
+    source_log: WazuhLog = Field(..., description="Complete original Wazuh log")
     slm_analysis: SlmResponse = Field(..., description="SLM response")
     llm_analysis: LlmResponse | None = Field(
         None, description="LLM response (None on timeout or error)"
