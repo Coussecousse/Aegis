@@ -6,13 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system aegis && adduser --system --ingroup aegis aegis
+RUN addgroup --system appuser && adduser --system --ingroup appuser appuser
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY . /app
 
-RUN pip install --upgrade pip && pip install -e .
+RUN pip install --upgrade pip && pip install --no-cache-dir -e /app
 
-USER aegis
+USER appuser
 
 ENTRYPOINT ["python", "-m", "aegis"]
