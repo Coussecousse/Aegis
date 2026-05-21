@@ -156,6 +156,8 @@ async def test_pipeline_tier0_high_confidence_results_critical() -> None:
     assert result is not None
     assert result.risk_score.danger_score >= 0.8
     assert result.decision.severity == "critical"
+    assert result.decision.auto_remediation_allowed is False
+    assert result.decision.requires_human_validation is True
 
 
 @pytest.mark.asyncio
@@ -189,7 +191,9 @@ async def test_pipeline_tier2_medium_confidence_in_expected_range() -> None:
     result = await process_log(_make_log(rule_level=8), ollama, chroma, shuffle)
 
     assert result is not None
-    assert 0.4 <= result.risk_score.danger_score <= 0.8
+    assert 0.4 <= result.risk_score.danger_score < 0.8
+    assert result.decision.auto_remediation_allowed is False
+    assert result.decision.requires_human_validation is True
 
 
 @pytest.mark.asyncio
@@ -214,10 +218,12 @@ async def test_pipeline_llm_timeout_uses_slm_fallback() -> None:
     assert result is not None
     assert result.llm_analysis is None
     assert result.risk_score.score_breakdown["llm_contribution"] == pytest.approx(0.39, rel=1e-2)
+    assert result.decision.auto_remediation_allowed is False
+    assert result.decision.requires_human_validation is True
 
 
 @pytest.mark.asyncio
-async def test_pipeline_soar_error_is_propagated() -> None:
+async def test_pipeline_soar_error_does_not_crash() -> None:
     ollama = _FakeOllamaClient(
         responses={
             "tinyllama-aegis": {
@@ -244,5 +250,8 @@ async def test_pipeline_soar_error_is_propagated() -> None:
     chroma = _FakeChromaDBClient(_make_rag("tier1"))
     shuffle = _FakeShuffleClient(should_fail=True)
 
-    with pytest.raises(RuntimeError, match="soar down"):
-        await process_log(_make_log(rule_level=10), ollama, chroma, shuffle)
+    result = await process_log(_make_log(rule_level=10), ollama, chroma, shuffle)
+
+    assert result is not None
+    assert result.decision.auto_remediation_allowed is False
+    assert result.decision.requires_human_validation is True
