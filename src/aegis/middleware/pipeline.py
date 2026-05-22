@@ -37,6 +37,7 @@ from aegis.middleware.prompt_builder import (
     build_slm_prompt,
 )
 from aegis.middleware.risk_scorer import compute_risk_score
+from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
 from aegis.soar.client import ShuffleClient
 
@@ -48,6 +49,7 @@ async def process_log(
     ollama_client: OllamaClient,
     chromadb_client: ChromaDBClient,
     shuffle_client: ShuffleClient,
+    metrics: MetricsCollector | None = None,
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,
     llm_timeout: float = 45.0,
@@ -80,6 +82,7 @@ async def process_log(
                      as benign during SLM gate.
     """
     start_time = time.time()
+    total_perf_start = time.perf_counter()
     pipeline_start = datetime.now(UTC)
     report_id = uuid4()
 
@@ -98,6 +101,7 @@ async def process_log(
     # ========================================================================
     # STEP 1: SLM - Quick suspicion scoring
     # ========================================================================
+    slm_stage_start = time.perf_counter()
     try:
         logger.debug(
             json.dumps(
@@ -128,7 +132,17 @@ async def process_log(
             )
         )
 
+        if metrics is not None:
+            metrics.record_slm(time.perf_counter() - slm_stage_start)
+
     except Exception as e:
+        if metrics is not None:
+            metrics.record_slm(time.perf_counter() - slm_stage_start)
+            metrics.record_alert(
+                status="error",
+                severity="unknown",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
         logger.error(
             json.dumps(
                 {
@@ -144,6 +158,12 @@ async def process_log(
     # STEP 2: Gate - Check suspicion threshold
     # ========================================================================
     if not slm.is_suspect or slm.confidence < suspicion_threshold:
+        if metrics is not None:
+            metrics.record_alert(
+                status="discarded",
+                severity="low",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
         logger.info(
             json.dumps(
                 {
@@ -168,6 +188,7 @@ async def process_log(
     # ========================================================================
     # STEP 3: RAG - Fetch asset context + UEBA
     # ========================================================================
+    rag_stage_start = time.perf_counter()
     try:
         logger.debug(
             json.dumps(
@@ -191,7 +212,17 @@ async def process_log(
             )
         )
 
+        if metrics is not None:
+            metrics.record_rag(time.perf_counter() - rag_stage_start)
+
     except Exception as e:
+        if metrics is not None:
+            metrics.record_rag(time.perf_counter() - rag_stage_start)
+            metrics.record_alert(
+                status="error",
+                severity="unknown",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
         logger.error(
             json.dumps(
                 {
@@ -207,6 +238,7 @@ async def process_log(
     # STEP 4: LLM - Detailed threat analysis (with fallback)
     # ========================================================================
     llm = None
+    llm_stage_start = time.perf_counter()
     try:
         logger.debug(
             json.dumps(
@@ -237,7 +269,12 @@ async def process_log(
             )
         )
 
+        if metrics is not None:
+            metrics.record_llm(time.perf_counter() - llm_stage_start)
+
     except (TimeoutError, Exception) as e:
+        if metrics is not None:
+            metrics.record_llm(time.perf_counter() - llm_stage_start)
         logger.warning(
             json.dumps(
                 {
@@ -281,6 +318,12 @@ async def process_log(
         )
 
     except Exception as e:
+        if metrics is not None:
+            metrics.record_alert(
+                status="error",
+                severity="unknown",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
         logger.error(
             json.dumps(
                 {
@@ -379,6 +422,12 @@ async def process_log(
         )
 
     except Exception as e:
+        if metrics is not None:
+            metrics.record_alert(
+                status="error",
+                severity="unknown",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
         logger.error(
             json.dumps(
                 {
@@ -404,6 +453,8 @@ async def process_log(
 
         success = await shuffle_client.send_report(report)
         if success:
+            if metrics is not None:
+                metrics.record_soar("success")
             logger.info(
                 json.dumps(
                     {
@@ -414,6 +465,8 @@ async def process_log(
             )
 
     except Exception as e:
+        if metrics is not None:
+            metrics.record_soar("failure")
         logger.warning(
             json.dumps(
                 {
@@ -437,5 +490,16 @@ async def process_log(
             }
         )
     )
+
+    if metrics is not None:
+        metrics.record_danger_score(
+            score=report.risk_score.danger_score,
+            criticality=report.rag_context.asset_criticality,
+        )
+        metrics.record_alert(
+            status="processed",
+            severity=report.decision.severity,
+            duration_s=time.perf_counter() - total_perf_start,
+        )
 
     return report

@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from aegis.llm.client import OllamaClient
 from aegis.middleware.models import WazuhLog
 from aegis.middleware.pipeline import process_log
+from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
 from aegis.soar.client import ShuffleClient
 
@@ -49,6 +50,7 @@ class RabbitMQConsumer:
         chromadb_host: str = "localhost",
         chromadb_port: int = 8000,
         shuffle_webhook_url: str = "http://shuffle:3001/api/v1/hooks/",
+        metrics: MetricsCollector | None = None,
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
         llm_timeout: float = 45.0,
@@ -67,6 +69,7 @@ class RabbitMQConsumer:
             chromadb_host: ChromaDB server hostname.
             chromadb_port: ChromaDB server port.
             shuffle_webhook_url: Shuffle SOAR webhook URL.
+            metrics: Optional metrics collector for Prometheus reporting.
             suspicion_threshold: Minimum SLM confidence to proceed (default: 0.5).
             slm_timeout: SLM inference timeout in seconds (default: 10).
             llm_timeout: LLM inference timeout in seconds (default: 45).
@@ -82,6 +85,7 @@ class RabbitMQConsumer:
         self.chromadb_host = chromadb_host
         self.chromadb_port = chromadb_port
         self.shuffle_webhook_url = shuffle_webhook_url
+        self.metrics = metrics
 
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
@@ -232,6 +236,7 @@ class RabbitMQConsumer:
                 ollama_client=ollama_client,
                 chromadb_client=chromadb_client,
                 shuffle_client=shuffle_client,
+                metrics=self.metrics,
                 suspicion_threshold=self.suspicion_threshold,
                 slm_timeout=self.slm_timeout,
                 llm_timeout=self.llm_timeout,

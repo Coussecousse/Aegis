@@ -26,8 +26,11 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
+from prometheus_client import start_http_server
 
 from aegis.middleware.consumer import RabbitMQConsumer
+from aegis.monitoring.metrics import MetricsCollector
+from aegis.vault.loader import load_secrets_to_env
 
 # Load environment variables from .env
 load_dotenv()
@@ -91,6 +94,10 @@ async def main() -> None:
     logging.info("AEGIS v0.3.0 - Sovereign SOC Orchestrator (On-Premise AI)")
     logging.info("=" * 80)
 
+    start_http_server(8080)
+    metrics_collector = MetricsCollector()
+    logging.info("Prometheus metrics endpoint started on port 8080")
+
     # Load configuration from environment
     rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
     rabbitmq_port = int(os.getenv("RABBITMQ_PORT", "5672"))
@@ -129,6 +136,7 @@ async def main() -> None:
         chromadb_host=chromadb_host,
         chromadb_port=chromadb_port,
         shuffle_webhook_url=shuffle_webhook_url,
+        metrics=metrics_collector,
         suspicion_threshold=suspicion_threshold,
         slm_timeout=slm_timeout,
         llm_timeout=llm_timeout,
@@ -145,5 +153,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    load_secrets_to_env()
     setup_logging()
     asyncio.run(main())

@@ -18,6 +18,7 @@ from aio_pika.abc import (
 
 from aegis.rag.client import ChromaDBClient
 from aegis.rag.ldap import LdapConfig, LdapConnector
+from aegis.vault.loader import load_secrets_to_env
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,8 @@ def build_identity_consumer_from_env() -> RabbitMQIdentityConsumer:
     Returns:
         RabbitMQIdentityConsumer configured from environment.
     """
+    load_secrets_to_env()
+
     return RabbitMQIdentityConsumer(
         rabbitmq_host=os.getenv("RABBITMQ_HOST", "localhost"),
         rabbitmq_port=int(os.getenv("RABBITMQ_PORT", "5672")),
