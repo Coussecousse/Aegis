@@ -13,7 +13,7 @@ scrape_configs:
 
   - job_name: middleware
     static_configs:
-      - targets: ['middleware:8000']
+      - targets: ['middleware:8080']
 
   - job_name: shuffle
     static_configs:

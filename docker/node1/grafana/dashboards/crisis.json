@@ -1,1 +1,108 @@
-{}
+{
+	"title": "AEGIS Crisis Dashboard",
+	"uid": "aegis-prometheus",
+	"schemaVersion": 39,
+	"version": 1,
+	"timezone": "browser",
+	"editable": true,
+	"refresh": "10s",
+	"time": {
+		"from": "now-6h",
+		"to": "now"
+	},
+	"panels": [
+		{
+			"id": 1,
+			"type": "timeseries",
+			"title": "Alert Processing Rate",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 0
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum by (status, severity) (rate(aegis_alerts_processed_total[5m]))",
+					"legendFormat": "{{status}}/{{severity}}"
+				}
+			]
+		},
+		{
+			"id": 2,
+			"type": "gauge",
+			"title": "Pipeline Duration p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 6,
+				"x": 12,
+				"y": 0
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))"
+				}
+			]
+		},
+		{
+			"id": 3,
+			"type": "stat",
+			"title": "Active Danger Score (by Tier)",
+			"gridPos": {
+				"h": 8,
+				"w": 6,
+				"x": 18,
+				"y": 0
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "max by (asset_criticality) (aegis_danger_score)",
+					"legendFormat": "{{asset_criticality}}"
+				}
+			]
+		},
+		{
+			"id": 4,
+			"type": "stat",
+			"title": "SOAR Delivery Success Rate",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 8
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum(rate(aegis_soar_deliveries_total{status=\"success\"}[5m])) / clamp_min(sum(rate(aegis_soar_deliveries_total[5m])), 0.0001)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percentunit"
+				},
+				"overrides": []
+			}
+		},
+		{
+			"id": 5,
+			"type": "timeseries",
+			"title": "LLM Inference Duration p95",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 8
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"llm\"}[5m])) by (le))"
+				}
+			]
+		}
+	]
+}
