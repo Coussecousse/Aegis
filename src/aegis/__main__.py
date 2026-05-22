@@ -91,7 +91,7 @@ async def main() -> None:
     Runs indefinitely until interrupted (SIGTERM/SIGINT).
     """
     logging.info("=" * 80)
-    logging.info("AEGIS v0.3.0 - Sovereign SOC Orchestrator (On-Premise AI)")
+    logging.info("AEGIS v0.4.0 - Sovereign SOC Orchestrator (On-Premise AI)")
     logging.info("=" * 80)
 
     start_http_server(8080)
