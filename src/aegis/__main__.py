@@ -125,6 +125,15 @@ async def main() -> None:
         f"suspicion_threshold={suspicion_threshold}"
     )
 
+    import urllib.parse
+
+    _shuffle_host = urllib.parse.urlparse(shuffle_webhook_url).hostname or ""
+    if _shuffle_host == "shuffle":
+        logging.warning(
+            "SHUFFLE_WEBHOOK_URL points to 'shuffle' hostname — "
+            "ensure the stack is started with --profile full or override SHUFFLE_WEBHOOK_URL"
+        )
+
     # Initialize consumer
     consumer = RabbitMQConsumer(
         rabbitmq_host=rabbitmq_host,
