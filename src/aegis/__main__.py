@@ -22,6 +22,7 @@ See .env.example and docs/raspberrypi-ollama-setup.md for details.
 import asyncio
 import logging
 import os
+import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -64,21 +65,36 @@ def setup_logging() -> None:
     root_logger.addHandler(console_handler)
 
     # File handler (rotating, max 10MB per file, 5 files)
-    log_file = Path(os.getenv("LOG_FILE", str(Path.home() / "aegis.log")))
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    explicit_log_file = os.getenv("LOG_FILE")
+    if explicit_log_file:
+        log_file = Path(explicit_log_file)
+    else:
+        home_dir = Path.home()
+        if (
+            str(home_dir) == "/nonexistent"
+            or not home_dir.exists()
+            or not os.access(home_dir, os.W_OK)
+        ):
+            log_file = Path(tempfile.gettempdir()) / "aegis.log"
+        else:
+            log_file = home_dir / "aegis.log"
 
-    file_handler = RotatingFileHandler(
-        filename=str(log_file),
-        maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=5,
-    )
-    file_handler.setLevel(log_level_int)
-    file_formatter = logging.Formatter(
-        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(file_handler)
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            filename=str(log_file),
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=5,
+        )
+        file_handler.setLevel(log_level_int)
+        file_formatter = logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+    except OSError as exc:
+        logging.warning(f"File logging disabled: {exc}")
 
     logging.info(f"Logging initialized at level {log_level}")
 

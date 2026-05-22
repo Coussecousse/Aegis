@@ -1,5 +1,6 @@
 """Async ChromaDB client for AEGIS RAG asset enrichment."""
 
+import asyncio
 import importlib
 import inspect
 import json
@@ -54,17 +55,30 @@ class ChromaDBClient:
         if self._client is None:
             chromadb_module = _get_chromadb_module()
             async_http_client = getattr(chromadb_module, "AsyncHttpClient", None)
-            if async_http_client is None:
-                raise RuntimeError("chromadb.AsyncHttpClient is unavailable")
-            self._client = await self._maybe_await(
-                async_http_client(
+            if async_http_client is not None:
+                self._client = await self._maybe_await(
+                    async_http_client(
+                        host=self.host,
+                        port=self.port,
+                    )
+                )
+            else:
+                http_client = getattr(chromadb_module, "HttpClient", None)
+                if http_client is None:
+                    raise RuntimeError("chromadb AsyncHttpClient/HttpClient are unavailable")
+                # Some chromadb builds expose only synchronous HttpClient.
+                self._client = await asyncio.to_thread(
+                    http_client,
                     host=self.host,
                     port=self.port,
                 )
-            )
+
+        client = self._client
+        if client is None:
+            raise RuntimeError("ChromaDB client initialization failed")
 
         self._collection = await self._maybe_await(
-            self._client.get_or_create_collection(
+            client.get_or_create_collection(
                 name=self._collection_name,
             )
         )
