@@ -174,15 +174,16 @@ aegis/
 
 ## Versioning
 
-- **Current version**: `v0.2.0`
+- **Current version**: `v0.4.0`
 - **Scheme**: SemVer (`MAJOR.MINOR.PATCH`)
 - PATCH bump: automatic on every merged PR via CI
 - MINOR bump: human decision when a new feature is complete
-- **v0.2.0 release criteria (done):**
-  - Complete middleware pipeline (consumer → SLM → RAG → LLM → risk_scorer → SOAR)
-  - Unit tests: models + risk_scorer (coverage ≥ 80%)
-  - 18 custom Wazuh rules (local_rules.xml)
-  - CI: lint + typecheck + test + security-scan + critical-gate
+- **v0.4.0 release criteria (done):**
+  - Wazuh collector bridge to RabbitMQ (`aegis.collectors` daemon + integration mode)
+  - Prometheus metrics instrumentation + Grafana dashboard provisioning
+  - Vault KV v2 client and startup secret loader integration
+  - Shuffle triage playbook template for human-in-the-loop workflow
+  - Unit/integration test suite passing with strict quality gate
 - **v1.0.0 release criteria**:
   1. Successful NIS 2 / AI Act audit
   2. Demonstrated MTTT (Mean Time To Triage) reduction ≥ 40 % in a real environment

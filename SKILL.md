@@ -83,33 +83,37 @@ No environment-specific assumptions should be hardcoded anywhere in the project.
 
 ---
 
-## Current State — v0.2.0
+## Current State — v0.4.0
 
 | File | Status |
 |---|---|
 | `middleware/models.py` | ✅ WazuhLog, SlmResponse, LlmResponse, RagContext, UEBAMetrics, RiskScore, Decision, AegisReport |
-| `middleware/pipeline.py` | ✅ Full 9-step pipeline, JSON structured logs |
+| `middleware/pipeline.py` | ✅ Full 9-step pipeline, JSON structured logs + Prometheus metrics hooks |
 | `middleware/consumer.py` | ✅ aio-pika, invalid JSON → ACK (no infinite requeue) |
 | `middleware/prompt_builder.py` | ✅ SLM 300 chars, LLM 500 chars |
 | `middleware/risk_scorer.py` | ✅ Composite formula + uncertainty |
 | `llm/client.py` | ✅ Async, retry 1s/2s/4s, defensive JSON parse |
-| `rag/client.py` | ⚠️ Stub — returns tier2 default, real ChromaDB search TODO v0.3 |
+| `rag/client.py` | ✅ Async ChromaDB metadata client with defensive fallback |
 | `soar/client.py` | ✅ Async webhook, retry |
-| `__main__.py` | ✅ Entry point, loads .env |
+| `collectors/wazuh_forwarder.py` | ✅ Wazuh JSON mapping + RabbitMQ publish bridge |
+| `collectors/__main__.py` | ✅ Integration mode + daemon mode for alerts.json polling |
+| `monitoring/metrics.py` | ✅ Prometheus counters/histograms/gauge collector |
+| `vault/client.py` | ✅ HashiCorp Vault KV v2 client (httpx) |
+| `vault/loader.py` | ✅ Runtime secrets loader into environment |
+| `__main__.py` | ✅ Entry point, loads Vault secrets and starts metrics endpoint |
 | `Modelfile.llm-mistral` | ✅ temperature 0.3, neutral system prompt |
 | `Modelfile.slm-tinyllama` | ✅ temperature 0.3, fast binary classifier |
-| `docker-compose.yml` (node1) | ⚠️ middleware Dockerfile missing |
+| `docker-compose.yml` (node1) | ✅ middleware + collector service + monitoring wiring |
 | `local_rules.xml` | ✅ 18 custom rules (IDs 100001–100042) |
 | `test_models.py` | ✅ Coverage ≥ 80% |
 | `test_risk_scorer.py` | ✅ Coverage ≥ 80% |
 
-## Backlog — v0.3 priorities
+## Backlog — v0.5 priorities
 
-- [ ] ChromaDB: implement real vector search (`rag/client.py`)
-- [ ] Middleware Dockerfile (`docker/node1/middleware/Dockerfile`)
-- [ ] HashiCorp Vault client (`vault/__init__.py` is empty)
-- [ ] Integration tests (`tests/integration/`)
-- [ ] Prometheus metrics in pipeline
+- [ ] End-to-end validation with live Wazuh manager integration in production-like environment
+- [ ] Expand integration test matrix (collector + RabbitMQ + middleware + SOAR)
+- [ ] Add incident archival and replay strategy for forensic workflows
+- [ ] Harden Grafana provisioning and dashboard alerts for SRE/SOC handoff
 - [ ] DynDNS for Livebox public IP (Orange dynamic IP)
 
 ---
