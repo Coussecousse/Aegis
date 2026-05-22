@@ -204,6 +204,32 @@ services:
     networks:
       - aegis-internal
 
+  collector:
+    build:
+      context: ../..
+      dockerfile: docker/node1/middleware/Dockerfile
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "aegis.collectors", "--daemon"]
+    volumes:
+      - wazuh-logs:/var/ossec/logs:ro
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-aegis}
+      WAZUH_ALERTS_FILE: ${WAZUH_ALERTS_FILE:-/var/ossec/logs/alerts/alerts.json}
+      WAZUH_MIN_LEVEL: ${WAZUH_MIN_LEVEL:-7}
+      WAZUH_POLL_INTERVAL: ${WAZUH_POLL_INTERVAL:-1.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      rabbitmq-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - aegis-internal
+
   shuffle-backend:
     image: ghcr.io/shuffle/shuffle-backend:1.2.0
     profiles: ["full"]
