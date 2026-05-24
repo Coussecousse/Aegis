@@ -17,15 +17,11 @@ services:
       INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD}
     volumes:
       - wazuh-indexer-data:/var/lib/wazuh-indexer
-      - ./wazuh/certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem:ro
-      - ./wazuh/certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.key:ro
-      - ./wazuh/certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.pem:ro
-      - ./wazuh/certs/admin.pem:/usr/share/wazuh-indexer/certs/admin.pem:ro
-      - ./wazuh/certs/admin-key.pem:/usr/share/wazuh-indexer/certs/admin-key.pem:ro
+      - ./wazuh/certs:/usr/share/wazuh-indexer/certs:ro
       - ./wazuh-indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/opensearch.yml:ro
       - ./wazuh-indexer/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml:ro
     healthcheck:
-      test: ["CMD-SHELL", "grep -q ':23F0' /proc/net/tcp || exit 1"]
+      test: ["CMD-SHELL", "grep -q ':23F0' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -109,7 +105,7 @@ services:
       wazuh.indexer:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q ':15E1' /proc/net/tcp || exit 1"]
+      test: ["CMD-SHELL", "grep -q ':15E1' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
