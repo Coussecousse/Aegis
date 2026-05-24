@@ -102,6 +102,7 @@ class LdapConnector(BaseIdentityConnector):
             port=self.config.port,
             use_ssl=self.config.use_ssl,
             connect_timeout=self.config.timeout,
+            get_info=ldap3_module.NONE,
         )
 
         connection = ldap3_module.Connection(
@@ -111,35 +112,42 @@ class LdapConnector(BaseIdentityConnector):
             auto_bind=True,
             receive_timeout=self.config.timeout,
             read_only=True,
+            raise_exceptions=False,
         )
 
-        search_filter = (
-            "(|"
-            f"(sAMAccountName={asset_identifier})"
+        # AD-style filter with sAMAccountName; falls back to cn-only for plain LDAP.
+        ad_filter = (
+            f"(|(sAMAccountName={asset_identifier})"
             f"(dNSHostName={asset_identifier})"
-            f"(cn={asset_identifier})"
-            ")"
+            f"(cn={asset_identifier}))"
         )
+        fallback_filter = f"(cn={asset_identifier})"
 
-        try:
-            found = connection.search(
+        found = connection.search(
+            search_base=self.config.base_dn,
+            search_filter=ad_filter,
+            attributes=ldap3_module.ALL_ATTRIBUTES,
+            size_limit=1,
+        )
+        if not found and connection.result.get("description") == "invalidAttributeSyntax":
+            connection.search(
                 search_base=self.config.base_dn,
-                search_filter=search_filter,
-                attributes=["distinguishedName", "memberOf", "sAMAccountName"],
+                search_filter=fallback_filter,
+                attributes=ldap3_module.ALL_ATTRIBUTES,
                 size_limit=1,
             )
-        except Exception as exc:
-            connection.unbind()
-            raise ConnectionError("LDAPS search failed") from exc
 
-        if not found or not connection.entries:
+        if not connection.entries:
             connection.unbind()
             return self._default_context(asset_identifier)
 
         entry = connection.entries[0]
 
         distinguished_name = self._extract_scalar_attribute(entry, "distinguishedName")
-        account_name = self._extract_scalar_attribute(entry, "sAMAccountName")
+        account_name = (
+            self._extract_scalar_attribute(entry, "sAMAccountName")
+            or self._extract_scalar_attribute(entry, "cn")
+        )
         groups = self._extract_list_attribute(entry, "memberOf")
 
         connection.unbind()

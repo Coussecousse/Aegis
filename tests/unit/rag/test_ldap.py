@@ -29,6 +29,7 @@ class _FakeLdapConnection:
         _ = args
         _ = kwargs
         self.entries: list[object] = [_FakeLdapEntry()]
+        self.result: dict[str, str] = {}
 
     def search(self, **kwargs: object) -> bool:
         _ = kwargs
@@ -47,6 +48,8 @@ class _FakeLdapServer:
 class _FakeLdapModule:
     Server = _FakeLdapServer
     Connection = _FakeLdapConnection
+    NONE = "NONE"
+    ALL_ATTRIBUTES = "*"
 
 
 @pytest.mark.asyncio
@@ -115,6 +118,8 @@ async def test_fetch_identity_context_tier0_custom_dn(monkeypatch: pytest.Monkey
     class _FakeModuleBuiltin:
         Server = _FakeLdapServer
         Connection = _FakeConnectionBuiltin
+        NONE = "NONE"
+        ALL_ATTRIBUTES = "*"
 
     config = LdapConfig(
         host="ldap.corp",
