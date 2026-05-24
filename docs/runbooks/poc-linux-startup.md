@@ -312,31 +312,54 @@ open http://localhost:15672  # Queues tab
 
 ## Partie C — Raspberry Pi setup (manual, done once)
 
+Replace `PI_USER` and `PI_IP` with your Pi's username and WireGuard IP (e.g. `10.0.0.1`).
+
 ```bash
 # From the dev machine — copy Modelfiles to the Pi
-scp docs/modelfiles/Modelfile.slm-tinyllama pi@10.0.0.1:~/
-scp docs/modelfiles/Modelfile.llm-mistral   pi@10.0.0.1:~/
+scp docs/modelfiles/Modelfile.slm-tinyllama PI_USER@PI_IP:~/
+scp docs/modelfiles/Modelfile.llm-mistral   PI_USER@PI_IP:~/
 
 # SSH into the Pi
-ssh pi@10.0.0.1
+ssh PI_USER@PI_IP
 
 # Check base models are present
-ollama list   # must show tinyllama and mistral
+ollama list
+# Required: tinyllama:latest, mistral:7b-instruct-q4_K_M
+```
 
-# Create AEGIS-tuned variants
+**Make Ollama listen on all interfaces** (required for Node1 to reach it via WireGuard).
+`systemctl edit` may silently discard an empty file — write the override directly:
+
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d/
+sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null << 'EOF'
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+
+# Verify — must show *:11434 (all interfaces)
+ss -tlnp | grep 11434
+```
+
+```bash
+# Create AEGIS-tuned model variants
 ollama create tinyllama-aegis -f ~/Modelfile.slm-tinyllama
 ollama create mistral-aegis   -f ~/Modelfile.llm-mistral
 
-# Make Ollama listen on all interfaces (required for Node1 to reach it via WireGuard)
-# Add to /etc/systemd/system/ollama.service under [Service]:
-#   Environment="OLLAMA_HOST=0.0.0.0:11434"
-sudo systemctl edit ollama   # add the Environment line
-sudo systemctl restart ollama
+# Verify (from the Pi)
+ollama list
+# Must include: tinyllama-aegis, mistral-aegis
+```
 
-# Quick test
-curl -s http://localhost:11434/api/tags | python3 -c "
-import sys, json
-for m in json.load(sys.stdin)['models']:
+**Verify from Node1 host** (curl is not installed in the middleware container):
+
+```bash
+python3 -c "
+import urllib.request, json
+r = urllib.request.urlopen('http://PI_IP:11434/api/tags', timeout=5)
+for m in json.loads(r.read()).get('models', []):
     print(m['name'])
 "
 # Must include: tinyllama-aegis, mistral-aegis

@@ -1,4 +1,4 @@
-FROM mistral
+FROM mistral:7b-instruct-q4_K_M
 
 # System prompt: Detailed threat analysis for human-in-the-loop validation
 # LLM role: provide thorough, actionable intelligence for security analysts
