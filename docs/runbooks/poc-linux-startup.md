@@ -1,7 +1,7 @@
 # AEGIS v0.4 — POC Startup Runbook (Linux)
 
-This runbook covers clean startup and verification of the Node 1 Docker stack on a Linux host.
-Run through it end-to-end before any POC demonstration.
+This runbook covers clean startup and verification of the Node 1 Docker stack on a Linux host,
+including the OpenLDAP identity sync pipeline.
 
 ---
 
@@ -9,14 +9,11 @@ Run through it end-to-end before any POC demonstration.
 
 ### 1. Kernel setting — OpenSearch memory map
 
-The Wazuh Indexer (OpenSearch) requires a large virtual memory map count.
-Check and set it before starting the stack:
-
 ```bash
 cat /proc/sys/vm/max_map_count
 # Must be ≥ 262144. If lower:
 sudo sysctl -w vm.max_map_count=262144
-# To persist across reboots, add to /etc/sysctl.conf:
+# To persist across reboots:
 echo 'vm.max_map_count=262144' | sudo tee -a /etc/sysctl.conf
 ```
 
@@ -29,73 +26,72 @@ docker compose version # Compose ≥ 2.20
 
 ### 3. Environment file
 
-The stack reads `docker/node1/.env`. If it does not exist yet, copy from the
-example template at the root and fill in your values:
+The Makefile reads **`.env` at the repo root** (not `docker/node1/.env`).
+Copy from the example and fill in your values:
 
 ```bash
-cp .env.example docker/node1/.env
-# Edit docker/node1/.env — replace all CHANGE_ME_USE_VAULT values
+cp .env.example .env
+# Edit .env — replace all CHANGE_ME_USE_VAULT values
 ```
 
-**Critical**: the bcrypt hashes in `docker/node1/wazuh-indexer/internal_users.yml` must
-match your `.env` values for `WAZUH_INDEXER_PASSWORD` (admin user) and
-`WAZUH_DASHBOARD_PASSWORD` (kibanaserver user). The hashes checked into the
-repo were generated from the passwords in the project `.env`.
+**Critical — Wazuh password hashes**: the bcrypt hashes in
+`docker/node1/wazuh-indexer/internal_users.yml` must match your `.env` values for
+`WAZUH_INDEXER_PASSWORD` (admin user) and `WAZUH_DASHBOARD_PASSWORD` (kibanaserver user).
+The hashes committed to the repo match the project `.env`.
 
-If you change those passwords, regenerate hashes via the Wazuh tool and update
-the file **before** first startup:
+If you change those passwords, regenerate hashes and update the file **before** first startup:
 
 ```bash
-# Start the indexer once, generate the hash, stop it
 docker run --rm wazuh/wazuh-indexer:4.7.5 \
   bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh \
   -p 'YOUR_NEW_PASSWORD' 2>/dev/null | tail -1
-# Paste the output into internal_users.yml for the appropriate user
-# Then do a clean start: docker compose down -v && docker compose up -d
+# Paste output into internal_users.yml for the appropriate user
+# Then: docker compose -f docker/node1/docker-compose.yml --env-file .env down -v
+```
+
+### 4. POC LDAP variables in `.env`
+
+For the identity sync pipeline add these to root `.env` (already present in `.env.example`):
+
+```
+LDAP_HOST=openldap
+LDAP_PORT=389
+LDAP_USE_SSL=false
+LDAP_BASE_DN=dc=industrie,dc=local
+LDAP_BIND_DN=cn=admin,dc=industrie,dc=local
+LDAP_BIND_PASSWORD=poc-ldap-admin
+LDAP_TIER0_GROUP_DN=cn=Domain Admins,cn=Users,dc=industrie,dc=local
 ```
 
 ---
 
-## Build images (first time or after code changes)
+## Step 1 — Build images (first time or after code changes)
 
 ```bash
 make docker-build
+docker system prune -f   # reclaim build cache — do this after every build
 ```
 
 ---
 
-## Starting the stack
+## Step 2 — Start the main stack
 
-> **Important**: always start from a clean state. If volumes from a previous run
-> exist, stale OpenSearch security indices will reject the current passwords.
+> **Important**: always start from a clean state on first run. Stale OpenSearch
+> security indices will reject current passwords if volumes exist from a prior run
+> with different passwords.
 
 ```bash
-# From the repo root:
 make docker-up
-# Equivalent to:
-# docker compose -f docker/node1/docker-compose.yml --env-file docker/node1/.env up -d
 ```
 
-For full mode (includes Shuffle SOAR):
-
-```bash
-make docker-up-full
-```
-
----
-
-## Monitoring startup
-
-The Wazuh Indexer takes ~60 seconds to become healthy before the Dashboard and
-Manager can start. Watch progress with:
+Monitor until all services reach healthy:
 
 ```bash
 make docker-ps
-# or:
-docker compose -f docker/node1/docker-compose.yml --env-file docker/node1/.env ps
+# or watch -n5 make docker-ps
 ```
 
-Expected final state (core mode — 9 containers):
+Expected final state (9 containers):
 
 | Service | Status |
 |---|---|
@@ -110,82 +106,265 @@ Expected final state (core mode — 9 containers):
 | prometheus | up |
 | grafana | up |
 
-Total time from `up -d` to all services healthy: approximately 3–5 minutes.
+Total time: ~3–5 minutes. The Wazuh indexer must become healthy before the manager
+and dashboard can start.
 
----
-
-## Verification
-
-Once all services show healthy, run these HTTP checks from the host:
+### Quick verification
 
 ```bash
-# Prometheus — must return 200
-curl -s -o /dev/null -w "%{http_code}" http://localhost:9090/-/healthy
-
-# RabbitMQ management — must return 200
-curl -s -o /dev/null -w "%{http_code}" http://localhost:15672
-
-# ChromaDB — must return 200
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/heartbeat
-
-# Grafana — must return 302 (redirect to login)
-curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
-
-# Wazuh Dashboard — must return 302 (redirect to login)
-curl -sk -o /dev/null -w "%{http_code}" https://localhost:5601
+curl -s -o /dev/null -w "%{http_code}" http://localhost:9090/-/healthy   # 200
+curl -s -o /dev/null -w "%{http_code}" http://localhost:15672             # 200
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/heartbeat  # 200
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000              # 302
+curl -sk -o /dev/null -w "%{http_code}" https://localhost:5601            # 302
 ```
 
-All five must return 200 or 302. A 503 from the Wazuh Dashboard means the
-`kibanaserver` password in `internal_users.yml` does not match `WAZUH_DASHBOARD_PASSWORD`
-in `.env` — see Troubleshooting below.
-
 ---
 
-## Access URLs and credentials
-
-| Service | URL | Credentials |
-|---|---|---|
-| Wazuh Dashboard | https://localhost:5601 | admin / `WAZUH_API_PASSWORD` from .env |
-| Grafana | http://localhost:3000 | `GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD` from .env |
-| Prometheus | http://localhost:9090 | — (no auth) |
-| RabbitMQ management | http://localhost:15672 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` from .env |
-| ChromaDB | http://localhost:8000 | — (no auth) |
-
-> The Wazuh Dashboard login user is `admin`. The password is `WAZUH_API_PASSWORD`
-> (not `WAZUH_INDEXER_PASSWORD`). The Wazuh API auth is separate from the indexer auth.
-
----
-
-## POC stack (OpenLDAP identity connector)
-
-After the main stack is healthy, start the POC overlay:
+## Step 3 — Start OpenLDAP (POC overlay)
 
 ```bash
 make docker-poc-up
-# Equivalent to:
-# docker compose -f docker/node1/docker-compose.poc.yml --env-file docker/node1/.env up -d
 ```
 
-Stop it independently:
+Verify it's running:
 
 ```bash
-make docker-poc-down
+docker ps | grep openldap   # must show Up
 ```
 
 ---
 
-## Stopping the stack
-
-Normal stop (preserves data volumes, fast restart):
+## Step 4 — Seed LDAP (15 assets)
 
 ```bash
-docker compose -f docker/node1/docker-compose.yml --env-file docker/node1/.env down
+docker exec -i aegis-poc-openldap-1 ldapadd -c \
+  -x -D "cn=admin,dc=industrie,dc=local" -w poc-ldap-admin \
+  < scripts/poc/seed_ldap.ldif
 ```
 
-Full teardown including all volumes (required after password changes):
+The `-c` flag continues on errors (safe to re-run if some entries already exist).
+
+Verify 3 tier0 assets are in the `Domain Admins` group:
 
 ```bash
-docker compose -f docker/node1/docker-compose.yml --env-file docker/node1/.env down -v
+docker exec aegis-poc-openldap-1 ldapsearch \
+  -x -H ldap://localhost:389 \
+  -D "cn=admin,dc=industrie,dc=local" -w poc-ldap-admin \
+  -b "dc=industrie,dc=local" "(objectClass=groupOfNames)" cn member \
+  2>/dev/null | grep -E "^cn:|^member:"
+# Expected: Domain Admins with members DC-01, DC-02, PKI-01
+```
+
+---
+
+## Step 5 — Synchronise LDAP → ChromaDB
+
+Publish 15 identity.sync messages via the RabbitMQ management API:
+
+```bash
+python3 - <<'EOF'
+import urllib.request, json, base64
+
+# Update USER/PASS to match RABBITMQ_USER / RABBITMQ_PASSWORD in .env
+RABBIT_URL = "http://localhost:15672/api/exchanges/aegis/aegis.alerts/publish"
+USER = "aegis"
+PASS = "YOUR_RABBITMQ_PASSWORD"
+
+assets = [
+    "DC-01", "DC-02", "PKI-01",
+    "SRV-FILE-01", "SRV-PRINT-01", "SRV-BACKUP-01",
+    "WS-PROD-01", "WS-PROD-02", "WS-PROD-03",
+    "WS-OFFICE-01", "WS-OFFICE-02",
+    "PLC-01", "PLC-02", "HMI-01", "SCADA-01",
+]
+
+auth = base64.b64encode(f"{USER}:{PASS}".encode()).decode()
+headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+
+success = 0
+for asset in assets:
+    payload = {
+        "properties": {},
+        "routing_key": "identity.sync",
+        "payload": json.dumps({"asset_id": asset}),
+        "payload_encoding": "string",
+    }
+    req = urllib.request.Request(RABBIT_URL, json.dumps(payload).encode(), headers, method="POST")
+    with urllib.request.urlopen(req, timeout=5) as r:
+        if json.loads(r.read()).get("routed"):
+            success += 1
+            print(f"  OK: {asset}")
+        else:
+            print(f"  NOT ROUTED: {asset}")
+
+print(f"\nPublished {success}/{len(assets)}")
+EOF
+```
+
+Wait ~10 seconds then check middleware logs — there should be **no** `WARNING` lines:
+
+```bash
+docker compose -f docker/node1/docker-compose.yml --env-file .env logs --tail=30 middleware \
+  | grep -v posthog
+```
+
+---
+
+## Step 6 — Verify ChromaDB count = 15
+
+ChromaDB requires a UUID to query by name, so extract it first:
+
+```bash
+COLL_ID=$(curl -s http://localhost:8000/api/v1/collections \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
+
+# Count
+curl -s "http://localhost:8000/api/v1/collections/$COLL_ID/count"
+# Expected: 15 (or more if Step 5 was run multiple times — each upsert is idempotent)
+
+# Spot-check tier0 detection
+curl -s -X POST "http://localhost:8000/api/v1/collections/$COLL_ID/get" \
+  -H "Content-Type: application/json" \
+  -d '{"ids":["DC-01","DC-02","PKI-01"]}' \
+  | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for i, m in zip(d['ids'], d['metadatas']):
+    print(i, m.get('asset_criticality'))
+"
+# Expected: DC-01 tier0 / DC-02 tier0 / PKI-01 tier0
+```
+
+---
+
+## Step 7 — Verify Raspberry Pi connectivity (Partie C prerequisite)
+
+The Pi must be reachable on WireGuard IP `10.0.0.1` with Ollama listening on `0.0.0.0:11434`.
+
+```bash
+docker exec aegis-node1-middleware-1 curl -s http://10.0.0.1:11434/api/tags
+# Expected: JSON list of models — must include tinyllama-aegis and mistral-aegis
+```
+
+If the models are not listed, run Partie C steps first (see below).
+
+---
+
+## Step 8 — Kali attack simulation
+
+Run from the Kali machine on the same network:
+
+```bash
+# SSH brute force (triggers Wazuh rule 5710/5712)
+hydra -l root -P /usr/share/wordlists/rockyou.txt ssh://192.168.1.10
+
+# Port scan (triggers Wazuh rule 1400x)
+nmap -sS -O 192.168.1.10
+
+# Sudo abuse (run on the monitored host itself)
+sudo su -
+
+# Tier0 asset alert simulation — publish a fake Wazuh alert via RabbitMQ
+python3 - <<'ALERT'
+import urllib.request, json, base64
+RABBIT_URL = "http://localhost:15672/api/exchanges/aegis/aegis.alerts/publish"
+auth = base64.b64encode(b"aegis:YOUR_RABBITMQ_PASSWORD").decode()
+headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+alert = {
+    "id": "test-001", "timestamp": "2026-05-24T12:00:00Z",
+    "rule": {"level": 12, "description": "Multiple authentication failures"},
+    "source_ip": "DC-01", "destination_ip": "192.168.1.20",
+    "agent": {"name": "DC-01"},
+}
+payload = {
+    "properties": {}, "routing_key": "aegis.triage",
+    "payload": json.dumps(alert), "payload_encoding": "string",
+}
+req = urllib.request.Request(RABBIT_URL, json.dumps(payload).encode(), headers, method="POST")
+print(json.loads(urllib.request.urlopen(req, timeout=5).read()))
+ALERT
+```
+
+---
+
+## Step 9 — Monitor
+
+```bash
+# Live middleware logs
+docker compose -f docker/node1/docker-compose.yml --env-file .env logs -f middleware \
+  | grep -v posthog
+
+# Grafana dashboard
+open http://localhost:3000   # login: GF_SECURITY_ADMIN_USER / GF_SECURITY_ADMIN_PASSWORD
+
+# RabbitMQ queue depths
+open http://localhost:15672  # Queues tab
+```
+
+---
+
+## Partie C — Raspberry Pi setup (manual, done once)
+
+```bash
+# From the dev machine — copy Modelfiles to the Pi
+scp docs/modelfiles/Modelfile.slm-tinyllama pi@10.0.0.1:~/
+scp docs/modelfiles/Modelfile.llm-mistral   pi@10.0.0.1:~/
+
+# SSH into the Pi
+ssh pi@10.0.0.1
+
+# Check base models are present
+ollama list   # must show tinyllama and mistral
+
+# Create AEGIS-tuned variants
+ollama create tinyllama-aegis -f ~/Modelfile.slm-tinyllama
+ollama create mistral-aegis   -f ~/Modelfile.llm-mistral
+
+# Make Ollama listen on all interfaces (required for Node1 to reach it via WireGuard)
+# Add to /etc/systemd/system/ollama.service under [Service]:
+#   Environment="OLLAMA_HOST=0.0.0.0:11434"
+sudo systemctl edit ollama   # add the Environment line
+sudo systemctl restart ollama
+
+# Quick test
+curl -s http://localhost:11434/api/tags | python3 -c "
+import sys, json
+for m in json.load(sys.stdin)['models']:
+    print(m['name'])
+"
+# Must include: tinyllama-aegis, mistral-aegis
+```
+
+---
+
+## Access URLs
+
+| Service | URL | Credentials |
+|---|---|---|
+| Wazuh Dashboard | https://localhost:5601 | admin / `WAZUH_API_PASSWORD` |
+| Grafana | http://localhost:3000 | `GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD` |
+| Prometheus | http://localhost:9090 | — |
+| RabbitMQ management | http://localhost:15672 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` |
+| ChromaDB | http://localhost:8000 | — |
+| phpLDAPadmin (POC) | http://localhost:8080 | cn=admin,dc=industrie,dc=local / `poc-ldap-admin` |
+
+---
+
+## Teardown
+
+```bash
+# Stop POC overlay
+make docker-poc-down
+
+# Stop main stack (preserves volumes)
+make docker-down
+
+# Full teardown including volumes (required if passwords changed)
+docker compose -f docker/node1/docker-compose.yml --env-file .env down -v
+
+# Reclaim space
+docker system prune -f
 ```
 
 ---
@@ -194,63 +373,66 @@ docker compose -f docker/node1/docker-compose.yml --env-file docker/node1/.env d
 
 ### Wazuh Dashboard returns 503
 
-**Cause**: the `kibanaserver` bcrypt hash in `internal_users.yml` does not match
-`WAZUH_DASHBOARD_PASSWORD` in `.env`. OpenSearch caches the old hash in its
-security index, so updating only `internal_users.yml` is not enough after first run.
+**Cause**: `kibanaserver` hash in `internal_users.yml` does not match `WAZUH_DASHBOARD_PASSWORD`.
+OpenSearch caches the security index from first startup — updating the file alone is not enough.
 
-**Fix**:
-1. Update `internal_users.yml` with a hash generated from the correct password
-   (see the hash generation command in Prerequisites).
-2. Run `docker compose down -v` to wipe the security index from the volume.
-3. Run `docker compose up -d` to start fresh.
+**Fix**: update the hash, run `down -v`, then `up`.
 
-The same applies to the `admin` user hash vs `WAZUH_INDEXER_PASSWORD`.
+### LDAP sync shows "Failed to sync asset, fallback data applied"
+
+**Cause**: one of three ldap3 2.9.1 bugs on Linux, all fixed in the current codebase:
+
+| Bug | Symptom | Fix applied |
+|---|---|---|
+| `struct.error` on `Connection()` | `auto_bind=True` triggers binary pack with wrong args | Use `AUTO_BIND_NO_TLS` |
+| `struct.error` on socket recv timeout | `receive_timeout` is float, `pack('LL',...)` requires int | Cast to `int()` |
+| `memberOf` missing | Plain OpenLDAP without `memberof` overlay has no `memberOf` attribute | Reverse `(member=<DN>)` search on the tier0 group |
+
+If you still see this warning, check that the middleware image was rebuilt after the latest code change:
+
+```bash
+make docker-build && docker system prune -f
+docker compose -f docker/node1/docker-compose.yml --env-file .env up -d --no-build middleware
+```
 
 ### Wazuh Indexer healthcheck never passes
 
-**Cause**: on Linux, OpenSearch binds to IPv6 (`tcp6`) rather than IPv4 (`tcp`).
-The healthcheck in this repo already covers both:
+On Linux, OpenSearch binds to IPv6 (`tcp6`). The healthcheck already covers both:
 
 ```yaml
 grep -q ':23F0' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1
 ```
 
-If you see the indexer stuck at `health: starting`, check which address it bound to:
+Port `9200` hex = `23F0`. Check which address is bound:
 
 ```bash
 docker exec aegis-node1-wazuh.indexer-1 cat /proc/net/tcp6 | grep 23F0
 ```
 
-Port `9200` in hex is `23F0`. If the line appears there, the healthcheck should pass.
-
 ### Ports 15672 / 8000 / 9090 not reachable from host
 
-**Cause**: services connected only to the `aegis-internal` network (marked
-`internal: true`) cannot publish ports to the host. The fix is to also connect
-the service to `aegis-monitoring` (the non-internal bridge) and add a `ports`
-mapping. This is already done in the current `docker-compose.yml`.
+Services connected only to `aegis-internal` (marked `internal: true`) cannot publish ports.
+They must also be connected to `aegis-monitoring`. Already fixed in current `docker-compose.yml`.
 
-### wazuh.manager or wazuh.dashboard stuck at `health: starting`
+### ChromaDB count API returns "InvalidUUID"
 
-Both depend on `wazuh.indexer: condition: service_healthy`. If the indexer
-takes longer than usual to initialize (fresh volume + security index creation),
-the dependent containers will stay in `health: starting` until it becomes
-healthy. Wait up to 5 minutes before investigating further.
-
-### Middleware/collector logs show connection refused
-
-The middleware and collector start after `rabbitmq-bootstrap` completes. If
-RabbitMQ is still initializing, they retry. Check with:
+The ChromaDB v0.4 API requires a UUID, not the collection name. Use:
 
 ```bash
-docker compose -f docker/node1/docker-compose.yml --env-file docker/node1/.env logs middleware collector
+COLL_ID=$(curl -s http://localhost:8000/api/v1/collections \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
+curl -s "http://localhost:8000/api/v1/collections/$COLL_ID/count"
 ```
 
----
+### `ldapadd` stops at first error
 
-## Linux-specific notes
+Add `-c` to continue on existing entries:
 
-- The Docker user running the stack must have access to Docker socket (`sudo usermod -aG docker $USER`).
-- The `HOME` directory for the `wazuh` system user inside containers may be
-  `/nonexistent`. AEGIS handles this gracefully by falling back to `tmpdir` for log files.
-- IPv6 must not be disabled system-wide, as OpenSearch binds to `::` on Linux Docker Engine.
+```bash
+ldapadd -c -x -D "cn=admin,dc=industrie,dc=local" -w poc-ldap-admin < seed.ldif
+```
+
+### make docker-up starts from wrong .env
+
+The Makefile reads **root `.env`**, not `docker/node1/.env`. All env vars (including LDAP)
+must be in the repo root `.env`.

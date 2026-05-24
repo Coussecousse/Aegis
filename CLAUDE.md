@@ -201,6 +201,20 @@ When generating code or files in a session:
   2 files, pause and ask for confirmation before continuing.
 - Never silently skip a file — if you decide not to generate something, say why.
 
+### Documentation Freshness Check (Mandatory Before Every Commit)
+
+Before committing any change, verify that the following are still accurate and
+update them if needed — in a **separate `docs` commit** when content changes:
+
+1. **README.md** — feature list, quickstart commands, env var table
+2. **Makefile** — does a new target need adding? are existing targets still correct?
+3. **`docs/runbooks/poc-linux-startup.md`** — POC steps, env var names, known issues
+4. **`.env.example`** — does it list every env var now read by the code?
+5. Any other doc in `docs/` that describes the changed component
+
+If none of those need updating, explicitly confirm in the commit body:
+`Docs: no update needed`.
+
 ### Default Agent Behavior (Do Not Ask Repeatedly)
 
 Unless explicitly told otherwise in the current session, the agent must:
@@ -208,4 +222,5 @@ Unless explicitly told otherwise in the current session, the agent must:
 - enforce commit granularity policy above,
 - run the full quality gate before commit/push,
 - use conventional commits that are specific and short,
-- avoid committing files explicitly marked as "hold" by the user.
+- avoid committing files explicitly marked as "hold" by the user,
+- run the documentation freshness check before every commit.
