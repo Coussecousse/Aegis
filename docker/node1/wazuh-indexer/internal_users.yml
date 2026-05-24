@@ -1,21 +1,21 @@
 ---
 # This is the internal user database
 # The hash value is a bcrypt hash and can be generated with plugin/tools/hash.sh
-# Default hashes are Wazuh 4.7 demo defaults — CHANGE ALL PASSWORDS IN PRODUCTION
+# Hashes match WAZUH_INDEXER_PASSWORD (admin) and WAZUH_DASHBOARD_PASSWORD (kibanaserver) in .env
 
 _meta:
   type: "internalusers"
   config_version: 2
 
 admin:
-  hash: "$2y$12$K/SpwjtB.wOHJ/Nc6GVRDuc1h0rM1DfvziFRNPtk27P.c4yDr9njO"
+  hash: "$2y$12$OzSrb7Ae5oB0lP9NbpK2hu7PtLYomoVFD64JZwqgpuD/5EgFYPxVO"
   reserved: true
   backend_roles:
     - "admin"
   description: "Demo admin user"
 
 kibanaserver:
-  hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrq2N0YrU3H."
+  hash: "$2y$12$b6p9p3pP.8S4VbemRlJIuO6124HixDBt08DTlT20NOThIfLWugZSK"
   reserved: true
   description: "Demo kibanaserver user"
 
