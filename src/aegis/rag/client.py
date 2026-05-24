@@ -249,7 +249,7 @@ class ChromaDBClient:
                 collection.upsert,
                 ids=[context.asset_name],
                 metadatas=[metadata],
-                documents=[context.asset_description],
+                embeddings=[[0.0]],
             )
             return True
         except Exception:
@@ -293,7 +293,7 @@ class ChromaDBClient:
                 collection.upsert,
                 ids=[asset_id],
                 metadatas=[metadata],
-                documents=[context.asset_description],
+                embeddings=[[0.0]],
             )
             return True
         except Exception:
