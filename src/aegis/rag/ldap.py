@@ -109,8 +109,8 @@ class LdapConnector(BaseIdentityConnector):
             server,
             user=self.config.bind_dn,
             password=self.config.bind_password,
-            auto_bind=True,
-            receive_timeout=self.config.timeout,
+            auto_bind=ldap3_module.AUTO_BIND_NO_TLS,
+            receive_timeout=int(self.config.timeout),
             read_only=True,
             raise_exceptions=False,
         )
@@ -143,12 +143,26 @@ class LdapConnector(BaseIdentityConnector):
 
         entry = connection.entries[0]
 
-        distinguished_name = self._extract_scalar_attribute(entry, "distinguishedName")
+        distinguished_name = getattr(entry, "entry_dn", None) or self._extract_scalar_attribute(
+            entry, "distinguishedName"
+        )
         account_name = (
             self._extract_scalar_attribute(entry, "sAMAccountName")
             or self._extract_scalar_attribute(entry, "cn")
         )
+        # memberOf is an operational attribute absent from plain OpenLDAP; fall back to a
+        # reverse membership lookup against the tier0 group using the BASE scope.
         groups = self._extract_list_attribute(entry, "memberOf")
+        if not groups and distinguished_name:
+            connection.search(
+                search_base=self.config.tier0_group_dn,
+                search_filter=f"(member={distinguished_name})",
+                search_scope=ldap3_module.BASE,
+                attributes=[],
+                size_limit=1,
+            )
+            if connection.entries:
+                groups = [self.config.tier0_group_dn]
 
         connection.unbind()
 

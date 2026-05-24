@@ -50,6 +50,7 @@ class _FakeLdapModule:
     Connection = _FakeLdapConnection
     NONE = "NONE"
     ALL_ATTRIBUTES = "*"
+    AUTO_BIND_NO_TLS = "AUTO_BIND_NO_TLS"
 
 
 @pytest.mark.asyncio
@@ -120,6 +121,7 @@ async def test_fetch_identity_context_tier0_custom_dn(monkeypatch: pytest.Monkey
         Connection = _FakeConnectionBuiltin
         NONE = "NONE"
         ALL_ATTRIBUTES = "*"
+        AUTO_BIND_NO_TLS = "AUTO_BIND_NO_TLS"
 
     config = LdapConfig(
         host="ldap.corp",
