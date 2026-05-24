@@ -37,6 +37,7 @@ class ChromaDBClient:
         self._client: Any | None = None
         self._collection: Any | None = None
         self._collection_name = "aegis_assets"
+        self._sync_mode = False
         logger.info(f"ChromaDB client initialized: {host}:{port}")
 
     async def __aenter__(self) -> "ChromaDBClient":
@@ -65,22 +66,19 @@ class ChromaDBClient:
             else:
                 http_client = getattr(chromadb_module, "HttpClient", None)
                 if http_client is None:
-                    raise RuntimeError("chromadb AsyncHttpClient/HttpClient are unavailable")
-                # Some chromadb builds expose only synchronous HttpClient.
-                self._client = await asyncio.to_thread(
-                    http_client,
+                    raise RuntimeError(
+                        "chromadb client is unavailable "
+                        "(neither AsyncHttpClient nor HttpClient found)"
+                    )
+                self._sync_mode = True
+                self._client = http_client(
                     host=self.host,
                     port=self.port,
                 )
 
-        client = self._client
-        if client is None:
-            raise RuntimeError("ChromaDB client initialization failed")
-
-        self._collection = await self._maybe_await(
-            client.get_or_create_collection(
-                name=self._collection_name,
-            )
+        self._collection = await self._call(
+            self._client.get_or_create_collection,
+            name=self._collection_name,
         )
         return self._collection
 
@@ -95,7 +93,7 @@ class ChromaDBClient:
         """
         try:
             collection = await self._ensure_collection()
-            results = await self._maybe_await(collection.get(ids=[asset_identifier]))
+            results = await self._call(collection.get, ids=[asset_identifier])
             metadatas = results.get("metadatas", []) if isinstance(results, dict) else []
 
             if not metadatas:
@@ -236,24 +234,22 @@ class ChromaDBClient:
         """
         try:
             collection = await self._ensure_collection()
-            await self._maybe_await(
-                collection.upsert(
-                    ids=[context.asset_name],
-                    metadatas=[
-                        {
-                            "asset_name": context.asset_name,
-                            "asset_criticality": context.asset_criticality,
-                            "asset_description": context.asset_description,
-                            "similar_incidents": json.dumps(context.similar_incidents),
-                            "baseline_description": context.ueba.baseline_description,
-                            "associated_users": json.dumps(context.ueba.associated_users),
-                            "normal_activity_window": context.ueba.normal_activity_window,
-                            "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
-                            "anomaly_score": str(context.ueba.anomaly_score),
-                        }
-                    ],
-                    documents=[context.asset_description],
-                )
+            metadata = {
+                "asset_name": context.asset_name,
+                "asset_criticality": context.asset_criticality,
+                "asset_description": context.asset_description,
+                "similar_incidents": json.dumps(context.similar_incidents),
+                "baseline_description": context.ueba.baseline_description,
+                "associated_users": json.dumps(context.ueba.associated_users),
+                "normal_activity_window": context.ueba.normal_activity_window,
+                "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                "anomaly_score": str(context.ueba.anomaly_score),
+            }
+            await self._call(
+                collection.upsert,
+                ids=[context.asset_name],
+                metadatas=[metadata],
+                documents=[context.asset_description],
             )
             return True
         except Exception:
@@ -281,25 +277,23 @@ class ChromaDBClient:
 
         try:
             collection = await self._ensure_collection()
-            await self._maybe_await(
-                collection.upsert(
-                    ids=[asset_id],
-                    metadatas=[
-                        {
-                            "asset_name": context.asset_name,
-                            "asset_criticality": context.asset_criticality,
-                            "asset_description": context.asset_description,
-                            "identity_asset_id": asset_id,
-                            "similar_incidents": json.dumps(context.similar_incidents),
-                            "baseline_description": context.ueba.baseline_description,
-                            "associated_users": json.dumps(context.ueba.associated_users),
-                            "normal_activity_window": context.ueba.normal_activity_window,
-                            "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
-                            "anomaly_score": str(context.ueba.anomaly_score),
-                        }
-                    ],
-                    documents=[context.asset_description],
-                )
+            metadata = {
+                "asset_name": context.asset_name,
+                "asset_criticality": context.asset_criticality,
+                "asset_description": context.asset_description,
+                "identity_asset_id": asset_id,
+                "similar_incidents": json.dumps(context.similar_incidents),
+                "baseline_description": context.ueba.baseline_description,
+                "associated_users": json.dumps(context.ueba.associated_users),
+                "normal_activity_window": context.ueba.normal_activity_window,
+                "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                "anomaly_score": str(context.ueba.anomaly_score),
+            }
+            await self._call(
+                collection.upsert,
+                ids=[asset_id],
+                metadatas=[metadata],
+                documents=[context.asset_description],
             )
             return True
         except Exception:
@@ -327,9 +321,15 @@ class ChromaDBClient:
         if self._client is not None:
             close_method = getattr(self._client, "close", None)
             if callable(close_method):
-                await self._maybe_await(close_method())
+                await self._call(close_method)
             self._client = None
             self._collection = None
+
+    async def _call(self, fn: Any, /, **kwargs: Any) -> Any:
+        """Call a ChromaDB method via asyncio.to_thread in sync mode, _maybe_await otherwise."""
+        if self._sync_mode:
+            return await asyncio.to_thread(fn, **kwargs)
+        return await self._maybe_await(fn(**kwargs))
 
     @staticmethod
     async def _maybe_await(value: Any) -> Any:
