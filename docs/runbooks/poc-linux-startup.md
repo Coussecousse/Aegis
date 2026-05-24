@@ -243,8 +243,14 @@ for i, m in zip(d['ids'], d['metadatas']):
 The Pi must be reachable on WireGuard IP `10.0.0.1` with Ollama listening on `0.0.0.0:11434`.
 
 ```bash
-docker exec aegis-node1-middleware-1 curl -s http://10.0.0.1:11434/api/tags
-# Expected: JSON list of models — must include tinyllama-aegis and mistral-aegis
+# curl is not installed in the middleware image — use Python instead
+docker exec aegis-node1-middleware-1 python3 -c "
+import urllib.request, json
+r = urllib.request.urlopen('http://10.0.0.1:11434/api/tags', timeout=5)
+for m in json.loads(r.read()).get('models', []):
+    print(m['name'])
+"
+# Expected: tinyllama-aegis and mistral-aegis in the list
 ```
 
 If the models are not listed, run Partie C steps first (see below).
