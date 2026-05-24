@@ -110,6 +110,9 @@ git checkout main
 cp .env.example .env
 # Edit .env with your local passwords (see .env.example for all variables)
 
+# Build the middleware and collector images (required on first run)
+make docker-build
+
 # Start Node 1 in core mode (default, without Shuffle)
 make docker-up
 
@@ -117,13 +120,17 @@ make docker-up
 make docker-up-full
 
 # Verify all services are healthy
-docker compose ps
+make docker-ps
 ```
 
 Once core services show `healthy`, the Wazuh Dashboard is available at
-`https://localhost:443` and Grafana at `http://localhost:3000`.
+`https://localhost:5601` and Grafana at `http://localhost:3000`.
 
 In full mode, Shuffle Frontend is available at `http://localhost:3001`.
+
+> **Linux note:** `vm.max_map_count` must be ≥ 262144 for the Wazuh indexer
+> (OpenSearch). Check with `cat /proc/sys/vm/max_map_count`. If lower, run
+> `sudo sysctl -w vm.max_map_count=262144` (add to `/etc/sysctl.conf` to persist).
 
 > The AI triage pipeline is production-ready in v0.4.0, with Wazuh collector
 bridge, Prometheus/Grafana observability, and Vault-based secret loading.
@@ -159,10 +166,13 @@ cp .env.example .env
 | `make security-scan` | Run Bandit + pip-audit |
 | `make pre-commit-all` | Run all hooks on all files |
 | `make clean` | Remove cache directories |
+| `make docker-build` | Build middleware and collector images |
 | `make docker-up` | Start Node 1 in core mode (without Shuffle) |
 | `make docker-up-full` | Start Node 1 in full mode (with Shuffle) |
 | `make docker-pull` | Pull core-mode images |
 | `make docker-pull-full` | Pull full-mode images |
+| `make docker-poc-up` | Start POC OpenLDAP stack (after main stack) |
+| `make docker-poc-down` | Stop POC OpenLDAP stack |
 
 > Run `make help` for the full list.
 
