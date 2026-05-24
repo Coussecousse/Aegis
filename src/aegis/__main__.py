@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from prometheus_client import start_http_server
 
 from aegis.middleware.consumer import RabbitMQConsumer
+from aegis.middleware.consumer_identity import build_identity_consumer_from_env
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.vault.loader import load_secrets_to_env
 
@@ -167,9 +168,14 @@ async def main() -> None:
         llm_timeout=llm_timeout,
     )
 
-    # Start consuming
+    identity_consumer = build_identity_consumer_from_env()
+
+    # Start both consumers concurrently — triage pipeline + identity sync
     try:
-        await consumer.start()
+        await asyncio.gather(
+            consumer.start(),
+            identity_consumer.start(),
+        )
     except KeyboardInterrupt:
         logging.info("Interrupted by user. Gracefully shutting down...")
     except Exception as e:

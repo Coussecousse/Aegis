@@ -42,6 +42,8 @@ class RabbitMQIdentityConsumer:
         ldap_bind_password: str = "",
         ldap_timeout: float = 5.0,
         ldap_tier0_group_dn: str = "CN=Domain Admins,CN=Users,DC=aerotech,DC=local",
+        ldap_use_ssl: bool = True,
+        ldap_port: int = 0,
     ) -> None:
         """Initialize dedicated identity synchronization consumer.
 
@@ -78,6 +80,8 @@ class RabbitMQIdentityConsumer:
             bind_password=ldap_bind_password,
             timeout=ldap_timeout,
             tier0_group_dn=ldap_tier0_group_dn,
+            use_ssl=ldap_use_ssl,
+            port=ldap_port,
         )
 
         self.connection: AbstractRobustConnection | None = None
@@ -192,4 +196,6 @@ def build_identity_consumer_from_env() -> RabbitMQIdentityConsumer:
         ldap_tier0_group_dn=os.getenv(
             "LDAP_TIER0_GROUP_DN", "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
         ),
+        ldap_use_ssl=os.getenv("LDAP_USE_SSL", "false").lower() == "true",
+        ldap_port=int(os.getenv("LDAP_PORT", "0")),
     )

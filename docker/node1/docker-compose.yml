@@ -196,6 +196,13 @@ services:
       SUSPICION_THRESHOLD: ${SUSPICION_THRESHOLD:-0.5}
       SHUFFLE_WEBHOOK_URL: ${SHUFFLE_WEBHOOK_URL}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LDAP_HOST: ${LDAP_HOST:-}
+      LDAP_PORT: ${LDAP_PORT:-0}
+      LDAP_USE_SSL: ${LDAP_USE_SSL:-false}
+      LDAP_BASE_DN: ${LDAP_BASE_DN:-}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
+      LDAP_TIER0_GROUP_DN: ${LDAP_TIER0_GROUP_DN:-}
     depends_on:
       rabbitmq:
         condition: service_healthy

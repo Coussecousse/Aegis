@@ -16,14 +16,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LdapConfig:
-    """Configuration for LDAPS identity extraction.
+    """Configuration for LDAP/LDAPS identity extraction.
 
     Args:
         host: LDAP server hostname.
         base_dn: LDAP search base DN.
         bind_dn: LDAP bind DN for the read-only service account.
         bind_password: LDAP bind password.
-        port: LDAPS port.
+        port: LDAP port. Defaults to 636 when use_ssl=True, 389 otherwise.
+        use_ssl: Enable LDAPS (TLS). Set to False for plain LDAP (POC/dev).
         timeout: Connection and query timeout in seconds.
         tier0_group_dn: Full DN of the group considered Tier 0 (Domain Admins).
             Override this for environments that differ from the default domain.
@@ -33,9 +34,15 @@ class LdapConfig:
     base_dn: str
     bind_dn: str
     bind_password: str
-    port: int = 636
+    use_ssl: bool = True
+    port: int = 0
     timeout: float = 5.0
     tier0_group_dn: str = "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
+
+    def __post_init__(self) -> None:
+        """Set default port based on use_ssl when port is unset."""
+        if self.port == 0:
+            object.__setattr__(self, "port", 636 if self.use_ssl else 389)
 
 
 class LdapConnector(BaseIdentityConnector):
@@ -93,7 +100,7 @@ class LdapConnector(BaseIdentityConnector):
         server = ldap3_module.Server(
             self.config.host,
             port=self.config.port,
-            use_ssl=True,
+            use_ssl=self.config.use_ssl,
             connect_timeout=self.config.timeout,
         )
 
