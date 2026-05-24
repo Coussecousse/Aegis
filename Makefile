@@ -16,8 +16,9 @@ endif
 
 .PHONY: help install lint format format-fix typecheck test test-critical \
         security-scan pre-commit-all clean \
-	docker-check docker-up docker-up-core docker-up-full docker-ps docker-logs docker-down \
-	docker-clean docker-restart docker-pull docker-pull-full
+	docker-check docker-build docker-up docker-up-core docker-up-full docker-ps docker-logs \
+	docker-down docker-clean docker-restart docker-pull docker-pull-full \
+	docker-poc-up docker-poc-down
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -27,8 +28,8 @@ help: ## Show this help message
 
 install: ## Create venv and install dev dependencies
 	python -m venv .venv
-	.venv/Scripts/pip install --upgrade pip || .venv/bin/pip install --upgrade pip
-	.venv/Scripts/pip install -e ".[dev]" || .venv/bin/pip install -e ".[dev]"
+	$(VENV_BIN)/pip install --upgrade pip
+	$(VENV_BIN)/pip install -e ".[dev]"
 
 lint: ## Run ruff linter
 	$(VENV_BIN)/ruff check src/ tests/
@@ -75,6 +76,9 @@ clean: ## Remove __pycache__, .mypy_cache, .ruff_cache, .pytest_cache
 docker-check: ## Validate compose config
 	$(COMPOSE) config
 
+docker-build: ## Build middleware and collector images
+	$(COMPOSE) build middleware collector
+
 docker-up: ## Start Node 1 core stack in detached mode (without Shuffle)
 	$(COMPOSE) up -d --no-build --no-recreate
 
@@ -105,3 +109,9 @@ docker-pull: ## Pull latest images for core stack (without Shuffle)
 
 docker-pull-full: ## Pull latest images including Shuffle services
 	$(COMPOSE_FULL) pull
+
+docker-poc-up: ## Start POC OpenLDAP stack (requires main stack running first)
+	docker compose -f docker/node1/docker-compose.poc.yml --env-file $(ENV_FILE) up -d
+
+docker-poc-down: ## Stop POC OpenLDAP stack
+	docker compose -f docker/node1/docker-compose.poc.yml --env-file $(ENV_FILE) down
