@@ -12,11 +12,12 @@ Defines strict JSON structures for each pipeline step:
 Zero secrets in this file. Type hints are mandatory everywhere.
 """
 
+import difflib
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class WazuhLog(BaseModel):
@@ -74,6 +75,23 @@ class SlmResponse(BaseModel):
         description="Detected behavior category",
     )
     reasoning_short: str = Field(..., description="Short scoring rationale (< 200 chars)")
+
+    @field_validator("behavior_category", mode="before")
+    @classmethod
+    def normalize_behavior_category(cls, v: Any) -> str:
+        """Fuzzy-match SLM output to the closest valid category (handles model typos)."""
+        valid = {
+            "lateral_movement",
+            "privilege_escalation",
+            "exfiltration",
+            "persistence",
+            "normal",
+        }
+        if v in valid:
+            return str(v)
+        matches = difflib.get_close_matches(str(v), valid, n=1, cutoff=0.75)
+        return str(matches[0]) if matches else "normal"
+
     raw_probabilities: dict[str, float] = Field(
         ..., description="Raw probabilities: {'suspect': float, 'benign': float}"
     )
