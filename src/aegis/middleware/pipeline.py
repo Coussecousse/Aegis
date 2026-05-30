@@ -118,6 +118,7 @@ async def process_log(
             model="tinyllama-aegis",
             prompt=slm_prompt,
             timeout=slm_timeout,
+            keep_alive=-1,  # keep SLM permanently in RAM for low-latency triage
         )
         slm = SlmResponse(**slm_response_dict)
 
@@ -138,21 +139,24 @@ async def process_log(
     except Exception as e:
         if metrics is not None:
             metrics.record_slm(time.perf_counter() - slm_stage_start)
-            metrics.record_alert(
-                status="error",
-                severity="unknown",
-                duration_s=time.perf_counter() - total_perf_start,
-            )
-        logger.error(
+        logger.warning(
             json.dumps(
                 {
                     "event": "slm_error",
                     "error": str(e),
                     "rule_id": log.rule_id,
+                    "fallback": "escalating_to_llm",
                 }
             )
         )
-        return None
+        # SLM failed (model too small, schema mismatch, timeout) — escalate conservatively
+        slm = SlmResponse(
+            is_suspect=True,
+            confidence=0.6,
+            behavior_category="normal",
+            reasoning_short="SLM triage unavailable — escalating to LLM",
+            raw_probabilities={"suspect": 0.6, "benign": 0.4},
+        )
 
     # ========================================================================
     # STEP 2: Gate - Check suspicion threshold
@@ -265,6 +269,10 @@ async def process_log(
                     "confidence": llm.confidence,
                     "attack_confirmed": llm.attack_confirmed,
                     "severity": llm.severity,
+                    "attack_type": llm.attack_type,
+                    "summary": llm.plain_language_summary,
+                    "action": llm.recommended_action,
+                    "requires_human_validation": llm.requires_human_validation,
                 }
             )
         )
