@@ -61,17 +61,25 @@ class OllamaClient:
         if self._client is not None:
             await self._client.aclose()
 
-    async def generate(self, model: str, prompt: str, timeout: float = 45.0) -> dict[str, Any]:
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        timeout: float = 45.0,
+        keep_alive: int = 300,
+    ) -> dict[str, Any]:
         """
         Generate response from Ollama model with exponential retry.
 
         Attempts up to 3 times with backoff: 1s, 2s, 4s.
-        Parses JSON from response (Modelfile ensures JSON-only output).
+        Parses JSON from response (constrained decoding via format=json).
 
         Args:
             model: Model name (e.g., "tinyllama-aegis", "mistral-aegis").
             prompt: Prompt text to send to the model.
-            timeout: Request timeout in seconds (SLM: 10s, LLM: 45s).
+            timeout: Request timeout in seconds (SLM: 30s, LLM: 180s).
+            keep_alive: Seconds to keep model in RAM after last request (default 5 min).
+                        Pass -1 to keep indefinitely, 0 to unload immediately.
 
         Returns:
             dict: Parsed JSON response from model.
@@ -85,6 +93,8 @@ class OllamaClient:
             "model": model,
             "prompt": prompt,
             "stream": False,
+            "format": "json",  # constrained decoding — forces valid JSON at the sampler level
+            "keep_alive": keep_alive,
         }
 
         backoff_times = [1.0, 2.0, 4.0]
