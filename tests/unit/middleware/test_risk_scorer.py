@@ -85,10 +85,10 @@ class TestComputeRiskScore:
             asset_criticality="tier1",
         )
 
-        # Formula: (0.65*0.30 + 0.70*0.50 + (9/15)*0.20) * 1.2
-        # = (0.195 + 0.35 + 0.12) * 1.2
-        # = 0.665 * 1.2 = 0.798 → ~0.798
-        assert 0.79 <= risk_score.danger_score <= 0.81
+        # Formula: (0.65*0.30 + 0.70*0.50 + (9/15)*0.20) * 1.2 * ueba_factor(0.5)
+        # = (0.195 + 0.35 + 0.12) * 1.2 * 0.85
+        # = 0.665 * 1.2 * 0.85 = 0.678
+        assert 0.67 <= risk_score.danger_score <= 0.69
         assert risk_score.uncertainty == "low"  # |0.65 - 0.70| = 0.05 < 0.1
         assert risk_score.score_breakdown["criticality_multiplier"] == 1.2
 
@@ -121,10 +121,9 @@ class TestComputeRiskScore:
             asset_criticality="tier2",
         )
 
-        # Formula: (0.45*0.30 + 0.40*0.50 + (3/15)*0.20) * 1.0
-        # = (0.135 + 0.20 + 0.04) * 1.0
-        # = 0.375
-        assert 0.37 <= risk_score.danger_score <= 0.38
+        # Formula: (0.45*0.30 + 0.40*0.50 + (3/15)*0.20) * 1.0 * ueba_factor(0.5)
+        # = 0.375 * 0.85 = 0.319
+        assert 0.31 <= risk_score.danger_score <= 0.33
         assert risk_score.uncertainty == "low"  # |0.45 - 0.40| = 0.05 < 0.1
         assert risk_score.score_breakdown["criticality_multiplier"] == 1.0
 
@@ -146,11 +145,9 @@ class TestComputeRiskScore:
             asset_criticality="tier0",
         )
 
-        # Formula: (0.75*0.30 + 0.75*0.50 + (12/15)*0.20) * 1.5
-        # (uses SLM confidence for LLM contribution)
-        # = (0.225 + 0.375 + 0.16) * 1.5
-        # = 0.76 * 1.5 = 1.14 → clamped to 1.0
-        assert risk_score.danger_score == 1.0
+        # Formula: (0.75*0.30 + 0.75*0.50 + (12/15)*0.20) * 1.5 * ueba_factor(0.5)
+        # = 0.76 * 1.5 * 0.85 = 0.969
+        assert 0.96 <= risk_score.danger_score <= 0.98
         assert risk_score.uncertainty == "low"  # |0.75 - 0.75| = 0.0
 
     def test_uncertainty_low(self) -> None:
