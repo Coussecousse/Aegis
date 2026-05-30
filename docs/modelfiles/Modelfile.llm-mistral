@@ -1,4 +1,4 @@
-FROM mistral:7b-instruct-q4_K_M
+FROM mistral-7b:latest
 
 # System prompt: Detailed threat analysis for human-in-the-loop validation
 # LLM role: provide thorough, actionable intelligence for security analysts
@@ -24,3 +24,4 @@ SYSTEM it could cause if unaddressed. Never minimize. Never exaggerate.
 PARAMETER temperature 0.3
 PARAMETER top_p 0.85
 PARAMETER num_predict 450
+PARAMETER num_ctx 2048
