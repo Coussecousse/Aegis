@@ -17,7 +17,9 @@ class _FakeOllamaClient:
         self._responses = responses
         self.calls: list[str] = []
 
-    async def generate(self, model: str, prompt: str, timeout: float) -> dict[str, Any]:
+    async def generate(
+        self, model: str, prompt: str, timeout: float, keep_alive: int = 300
+    ) -> dict[str, Any]:
         _ = prompt
         _ = timeout
         self.calls.append(model)
