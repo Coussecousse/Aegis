@@ -367,6 +367,222 @@ for m in json.loads(r.read()).get('models', []):
 
 ---
 
+## Partie D — Juice Shop (cible d'attaque réaliste)
+
+OWASP Juice Shop est une application web volontairement vulnérable. Elle sert de cible aux attaques
+Kali, dont les requêtes sont interceptées par nginx, loguées en format Apache, puis analysées par
+le Wazuh agent (règles 31100+).
+
+### D.1 — Lancer Juice Shop + nginx
+
+```bash
+make docker-juiceshop-up
+# Vérifier
+curl -s -o /dev/null -w "%{http_code}" http://localhost:9080   # 200
+```
+
+Juice Shop est accessible sur le port **9080**. nginx reverse-proxifie vers Juice Shop et écrit ses
+access logs dans `docker/node1/juice-shop/logs/access.log` (monté sur le host pour le Wazuh agent).
+
+### D.2 — Installer le Wazuh agent sur Node1 (Ubuntu 24.04, done once)
+
+```bash
+# Télécharger le paquet
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.7.5-1_amd64.deb
+
+# Installer avec le manager Docker (127.0.0.1 = manager exposé sur le host)
+sudo WAZUH_MANAGER='127.0.0.1' WAZUH_AGENT_NAME='node1-host' \
+  dpkg -i ./wazuh-agent_4.7.5-1_amd64.deb
+
+# Démarrer l'agent
+sudo systemctl daemon-reload
+sudo systemctl enable wazuh-agent
+sudo systemctl start wazuh-agent
+
+# Vérifier
+sudo systemctl status wazuh-agent | grep Active
+```
+
+> **Port 1515 requis** : le manager doit exposer le port 1515 (enregistrement agent).
+> C'est déjà configuré dans `docker-compose.yml`.
+
+Si l'agent ne se connecte pas automatiquement, forcer l'enregistrement :
+
+```bash
+sudo /var/ossec/bin/agent-auth -m 127.0.0.1 -p 1515 -A node1-host
+sudo systemctl restart wazuh-agent
+```
+
+Vérifier la connexion via l'API manager :
+
+```bash
+TOKEN=$(curl -su "wazuh-wui:WAZUH_API_PASSWORD" \
+  "https://localhost:55000/security/user/authenticate?raw=true" -k)
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  "https://localhost:55000/agents" | python3 -c "
+import sys,json
+for a in json.load(sys.stdin)['data']['affected_items']:
+    print(a['id'], a['name'], a['status'])
+"
+# Doit afficher : 001 node1-host active
+```
+
+### D.3 — Configurer l'agent pour surveiller les logs nginx
+
+Ajouter la source de log à la configuration de l'agent :
+
+```bash
+sudo tee -a /var/ossec/etc/ossec.conf > /dev/null << 'EOF'
+<ossec_config>
+  <localfile>
+    <log_format>apache</log_format>
+    <location>/CHEMIN_ABSOLU_VERS_REPO/docker/node1/juice-shop/logs/access.log</location>
+  </localfile>
+</ossec_config>
+EOF
+
+sudo systemctl restart wazuh-agent
+```
+
+Remplacer `CHEMIN_ABSOLU_VERS_REPO` par le chemin réel vers le dépôt (ex. `/home/user/src/aegis`).
+
+### D.4 — Vérifier dans le Wazuh Dashboard
+
+1. Ouvrir `https://localhost:5601`
+2. **Agents** → `node1-host` doit apparaître en vert (`Active`)
+3. Faire une requête test : `curl http://localhost:9080`
+4. Dans **Security events** → les logs nginx doivent apparaître
+
+---
+
+## Partie E — Attaques Kali (simulation réaliste)
+
+Depuis la machine Kali sur le même réseau, cibler `http://NODE1_IP:9080` (Juice Shop via nginx).
+
+### E.1 — Récupérer l'IP de Node1
+
+```bash
+# Sur Node1
+ip addr | grep "inet " | grep -v 127 | awk '{print $2}'
+```
+
+### E.2 — Attaques et règles Wazuh attendues
+
+| Attaque | Outil Kali | Règle Wazuh | Level |
+|---|---|---|---|
+| Scan de vulnérabilités web | `nikto -h http://NODE1_IP:9080` | 31108 (scanner) | 10 |
+| SQL injection | `sqlmap -u "http://NODE1_IP:9080/rest/products/search?q=1"` | 31112 | 10 |
+| Brute force login | `hydra -l admin@juice-sh.op -P rockyou.txt NODE1_IP http-post-form "..."` | 31151 | 10 |
+| Directory traversal | `curl "http://NODE1_IP:9080/../etc/passwd"` | 31120 | 10 |
+| Scan de ports | `nmap -sS -O NODE1_IP` | 40101 | 8 |
+| SSH brute force | `hydra -l root -P rockyou.txt ssh://NODE1_IP` | 5712 | 10 |
+
+### E.3 — Commandes Kali rapides
+
+```bash
+# Scan complet Nikto (déclenche plusieurs règles Wazuh)
+nikto -h http://NODE1_IP:9080 -o nikto_output.txt
+
+# SQL injection automatique
+sqlmap -u "http://NODE1_IP:9080/rest/products/search?q=test" \
+  --batch --level=3 --risk=2
+
+# Scan nmap agressif (déclenche règles HIDS)
+nmap -sV -O --script=vuln NODE1_IP
+```
+
+### E.4 — Observer AEGIS réagir
+
+```bash
+# Logs middleware en direct
+docker compose -f docker/node1/docker-compose.yml --env-file .env \
+  logs -f middleware | grep -v posthog
+
+# Vérifier la file RabbitMQ (alertes en attente de traitement)
+# http://localhost:15672 → Queues → aegis.triage
+```
+
+Les rapports AEGIS apparaissent dans **Shuffle** (`http://localhost:3001`) →
+onglet **Executions** du workflow "AEGIS Alerts".
+
+---
+
+## Partie F — Shuffle SOAR (human-in-the-loop)
+
+### F.1 — Démarrer Shuffle
+
+```bash
+docker compose -f docker/node1/docker-compose.yml --env-file .env \
+  --profile full up -d shuffle-database shuffle-backend shuffle-orborus shuffle-frontend
+```
+
+Attendre ~2 min. Vérifier : `http://localhost:3001`
+
+### F.2 — Première configuration (done once)
+
+1. Créer un compte admin sur `http://localhost:3001`
+2. **Apps** → chercher `Shuffle Tools` → l'activer si absent
+3. **New Workflow** → nommer `AEGIS Alerts`
+4. Glisser **Shuffle Tools** sur le canvas → cocher "Starting node"
+5. **Triggers** → glisser **Webhook** → connecter au nœud Shuffle Tools
+6. **Save** → activer le workflow (toggle en haut)
+7. Cliquer sur le Webhook → copier l'URL (`http://shuffle-backend:5001/api/v1/hooks/XXXX`)
+
+### F.3 — Récupérer les identifiants Orborus
+
+Après le premier démarrage, récupérer l'ORG_ID et l'API key pour Orborus :
+
+```bash
+# ORG_ID (dans les logs du backend)
+docker logs aegis-node1-shuffle-backend-1 2>&1 | \
+  grep "organization" | tail -1 | grep -oE '[0-9a-f-]{36}'
+
+# API key : Shuffle UI → icône profil (haut droite) → copier la clé
+```
+
+Mettre à jour `.env` :
+
+```bash
+# Remplacer les valeurs CHANGE_ME
+sed -i 's/SHUFFLE_ORG_ID=.*/SHUFFLE_ORG_ID=VOTRE_ORG_ID/' .env
+sed -i 's/SHUFFLE_API_KEY=.*/SHUFFLE_API_KEY=VOTRE_API_KEY/' .env
+sed -i 's|SHUFFLE_WEBHOOK_URL=.*|SHUFFLE_WEBHOOK_URL=http://shuffle-backend:5001/api/v1/hooks/VOTRE_HOOK_ID|' .env
+
+# Redémarrer le middleware avec le nouveau webhook
+docker compose -f docker/node1/docker-compose.yml --env-file .env \
+  up -d --no-build middleware
+```
+
+### F.4 — Vérifier la réception des alertes
+
+Envoyer une alerte test :
+
+```bash
+python3 - <<'EOF'
+import urllib.request, json, base64, uuid
+RABBIT_URL = "http://localhost:15672/api/exchanges/aegis/aegis.alerts/publish"
+auth = base64.b64encode(b"aegis:RABBITMQ_PASSWORD").decode()
+headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+alert = {
+    "id": str(uuid.uuid4()), "timestamp": "2026-01-01T00:00:00Z",
+    "rule_id": 5712, "rule_level": 12,
+    "rule_description": "SSH brute force test",
+    "source_agent": "DC-01", "source_ip": "DC-01",
+    "full_log": "Test: Failed password for root from 10.0.0.1 port 22 ssh2 (x30)",
+    "decoder_name": "sshd",
+}
+payload = {"properties": {}, "routing_key": "alert.raw",
+           "payload": json.dumps(alert), "payload_encoding": "string"}
+req = urllib.request.Request(RABBIT_URL, json.dumps(payload).encode(), headers, method="POST")
+print(json.loads(urllib.request.urlopen(req, timeout=5).read()))
+EOF
+```
+
+Après ~5 min (traitement Pi), l'exécution apparaît dans Shuffle avec le rapport complet :
+`attack_type`, `severity`, `summary`, `recommended_action`, `requires_human_validation`.
+
+---
+
 ## Access URLs
 
 | Service | URL | Credentials |
@@ -377,6 +593,8 @@ for m in json.loads(r.read()).get('models', []):
 | RabbitMQ management | http://localhost:15672 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` |
 | ChromaDB | http://localhost:8000 | — |
 | phpLDAPadmin (POC) | http://localhost:8080 | cn=admin,dc=industrie,dc=local / `poc-ldap-admin` |
+| Shuffle SOAR | http://localhost:3001 | compte créé au premier lancement |
+| Juice Shop | http://localhost:9080 | — (cible d'attaque, pas de credentials) |
 
 ---
 
