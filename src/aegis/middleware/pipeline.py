@@ -239,6 +239,31 @@ async def process_log(
         return None
 
     # ========================================================================
+    # STEP 3b: UEBA false-positive gate
+    # Discard if behaviour is normal (low anomaly), rule is low severity,
+    # and asset is not critical infrastructure. Avoids wasting LLM on obvious FPs.
+    # ========================================================================
+    if rag.ueba.anomaly_score < 0.15 and log.rule_level <= 8 and rag.asset_criticality != "tier0":
+        if metrics is not None:
+            metrics.record_alert(
+                status="discarded",
+                severity="low",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
+        logger.info(
+            json.dumps(
+                {
+                    "event": "alert_discarded",
+                    "reason": "ueba_fp_gate",
+                    "ueba_anomaly_score": rag.ueba.anomaly_score,
+                    "rule_level": log.rule_level,
+                    "asset_criticality": rag.asset_criticality,
+                }
+            )
+        )
+        return None
+
+    # ========================================================================
     # STEP 4: LLM - Detailed threat analysis (with fallback)
     # ========================================================================
     llm = None
@@ -312,6 +337,7 @@ async def process_log(
             llm=llm,
             rule_level=log.rule_level,
             asset_criticality=rag.asset_criticality,
+            ueba_anomaly_score=rag.ueba.anomaly_score,
         )
 
         logger.info(
