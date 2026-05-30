@@ -284,7 +284,7 @@ alert = {
     "agent": {"name": "DC-01"},
 }
 payload = {
-    "properties": {}, "routing_key": "aegis.triage",
+    "properties": {}, "routing_key": "alert.raw",
     "payload": json.dumps(alert), "payload_encoding": "string",
 }
 req = urllib.request.Request(RABBIT_URL, json.dumps(payload).encode(), headers, method="POST")
@@ -465,3 +465,37 @@ ldapadd -c -x -D "cn=admin,dc=industrie,dc=local" -w poc-ldap-admin < seed.ldif
 
 The Makefile reads **root `.env`**, not `docker/node1/.env`. All env vars (including LDAP)
 must be in the repo root `.env`.
+
+### Wazuh Dashboard — "No API available to connect"
+
+**Cause**: `docker/node1/wazuh-dashboard/wazuh.yml` still has the placeholder password
+`CHANGE_ME_USE_VAULT` instead of your actual `WAZUH_API_PASSWORD`.
+
+**Fix** (do not commit — local only):
+
+```bash
+# Replace the placeholder with your real WAZUH_API_PASSWORD
+sed -i "s/CHANGE_ME_USE_VAULT/$(grep ^WAZUH_API_PASSWORD= .env | cut -d= -f2)/" \
+  docker/node1/wazuh-dashboard/wazuh.yml
+
+docker compose -f docker/node1/docker-compose.yml --env-file .env restart wazuh.dashboard
+```
+
+### SLM (TinyLlama) timeouts on Raspberry Pi
+
+**Cause**: default `SLM_TIMEOUT=10` is too short for a cold-start on a Pi.
+TinyLlama typically responds in 15–20 s on first call, then 1–3 s with `keep_alive` active.
+
+**Fix**: set in root `.env`:
+
+```
+SLM_TIMEOUT=30
+LLM_TIMEOUT=180
+```
+
+Then rebuild and restart middleware:
+
+```bash
+make docker-build && docker system prune -f
+docker compose -f docker/node1/docker-compose.yml --env-file .env up -d --no-build middleware
+```
