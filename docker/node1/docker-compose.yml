@@ -33,7 +33,8 @@ services:
     hostname: wazuh.manager
     restart: unless-stopped
     ports:
-      - "1514:1514/tcp"
+      - "1514:1514/tcp"   # agent ↔ manager: ongoing communication (alerts, heartbeat)
+      - "1515:1515/tcp"   # agent enrollment: TLS registration (one-time, required for agent-auth)
       - "55000:55000/tcp"
     ulimits:
       memlock:
@@ -98,7 +99,6 @@ services:
       - ./wazuh/certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem:ro
       - ./wazuh/certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem:ro
       - ./wazuh-dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
-      - ./wazuh-dashboard/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml:ro
       - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
       - wazuh-dashboard-custom:/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom
     depends_on:
@@ -246,11 +246,12 @@ services:
     restart: unless-stopped
     volumes:
       - shuffle-data:/shuffle-data
+      - shuffle-apps:/shuffle-apps
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       BACKEND_HOSTNAME: shuffle-backend
-      DATASTORE_EMULATOR_HOST: node-0.example.com:9200
-      OPENSEARCH_URL: https://node-0.example.com:9200
-      SHUFFLE_OPENSEARCH_SKIPSSL: "true"
+      SHUFFLE_OPENSEARCH_URL: http://shuffle-database:9200
+      SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
       SHUFFLE_ENCRYPTION_MODIFIER: ${SHUFFLE_ENCRYPTION_MODIFIER}
       OUTER_HOSTNAME: ${OUTER_HOSTNAME}
     depends_on:
@@ -258,6 +259,27 @@ services:
     networks:
       - aegis-internal
       - aegis-monitoring
+
+  shuffle-orborus:
+    image: ghcr.io/shuffle/shuffle-orborus:1.2.0
+    profiles: ["full"]
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      ENVIRONMENT_NAME: Shuffle
+      BASE_URL: http://shuffle-backend:5001
+      DOCKER_API_VERSION: "1.40"
+      ORG_ID: ${SHUFFLE_ORG_ID}
+      AUTH: ${SHUFFLE_API_KEY}
+      SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
+      CLEANUP: "false"
+      WORKER_TIMEOUT: "86400"
+      SHUFFLE_ORBORUS_STARTUP_DELAY: "30"
+    depends_on:
+      - shuffle-backend
+    networks:
+      - aegis-internal
 
   shuffle-frontend:
     image: ghcr.io/shuffle/shuffle-frontend:1.2.0
@@ -279,6 +301,7 @@ services:
     restart: unless-stopped
     environment:
       discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
       OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
     volumes:
       - shuffle-data:/usr/share/opensearch/data
@@ -347,5 +370,6 @@ volumes:
   rabbitmq-data:
   chromadb-data:
   shuffle-data:
+  shuffle-apps:
   prometheus-data:
   grafana-data:
