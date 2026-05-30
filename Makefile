@@ -18,7 +18,8 @@ endif
         security-scan pre-commit-all clean \
 	docker-check docker-build docker-up docker-up-core docker-up-full docker-ps docker-logs \
 	docker-down docker-clean docker-restart docker-pull docker-pull-full \
-	docker-poc-up docker-poc-down
+	docker-poc-up docker-poc-down \
+	docker-juiceshop-up docker-juiceshop-down
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
@@ -115,3 +116,9 @@ docker-poc-up: ## Start POC OpenLDAP stack (requires main stack running first)
 
 docker-poc-down: ## Stop POC OpenLDAP stack
 	docker compose -f docker/node1/docker-compose.poc.yml --env-file $(ENV_FILE) down
+
+docker-juiceshop-up: ## Start Juice Shop + nginx attack target (port 9080)
+	docker compose -f docker/node1/docker-compose.juiceshop.yml up -d
+
+docker-juiceshop-down: ## Stop Juice Shop stack
+	docker compose -f docker/node1/docker-compose.juiceshop.yml down
