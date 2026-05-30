@@ -248,8 +248,8 @@ services:
       - shuffle-data:/shuffle-data
     environment:
       BACKEND_HOSTNAME: shuffle-backend
-      DATASTORE_EMULATOR_HOST: shuffle-database:8000
-      OPENSEARCH_URL: http://shuffle-database:9200
+      DATASTORE_EMULATOR_HOST: node-0.example.com:9200
+      OPENSEARCH_URL: https://node-0.example.com:9200
       SHUFFLE_OPENSEARCH_SKIPSSL: "true"
       SHUFFLE_ENCRYPTION_MODIFIER: ${SHUFFLE_ENCRYPTION_MODIFIER}
       OUTER_HOSTNAME: ${OUTER_HOSTNAME}
@@ -274,12 +274,11 @@ services:
       - aegis-monitoring
 
   shuffle-database:
-    image: opensearchproject/opensearch:2.14.0
+    image: opensearchproject/opensearch:2.11.1
     profiles: ["full"]
     restart: unless-stopped
     environment:
       discovery.type: single-node
-      DISABLE_SECURITY_PLUGIN: "true"
       OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
     volumes:
       - shuffle-data:/usr/share/opensearch/data

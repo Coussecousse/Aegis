@@ -146,10 +146,9 @@ class LdapConnector(BaseIdentityConnector):
         distinguished_name = getattr(entry, "entry_dn", None) or self._extract_scalar_attribute(
             entry, "distinguishedName"
         )
-        account_name = (
-            self._extract_scalar_attribute(entry, "sAMAccountName")
-            or self._extract_scalar_attribute(entry, "cn")
-        )
+        account_name = self._extract_scalar_attribute(
+            entry, "sAMAccountName"
+        ) or self._extract_scalar_attribute(entry, "cn")
         # memberOf is an operational attribute absent from plain OpenLDAP; fall back to a
         # reverse membership lookup against the tier0 group using the BASE scope.
         groups = self._extract_list_attribute(entry, "memberOf")
