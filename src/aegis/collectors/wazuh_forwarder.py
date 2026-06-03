@@ -72,6 +72,11 @@ class WazuhAlertParser:
         if rule_level < min_level:
             return None
 
+        # Wazuh operational rules: agent lifecycle events, not security alerts
+        _operational_rules = {501, 502, 503, 510, 511, 512, 513}
+        if rule_id in _operational_rules:
+            return None
+
         mitre_technique = WazuhAlertParser._extract_mitre_technique(payload)
         decoder_name = WazuhAlertParser._read_nested_string(payload, "decoder", "name")
 
