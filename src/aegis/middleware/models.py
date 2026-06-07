@@ -247,6 +247,35 @@ class RagContext(BaseModel):
     )
 
 
+class EscalatedAlert(BaseModel):
+    """Bundle handed from the triage stage to the analysis stage via RabbitMQ.
+
+    Carries everything the analysis stage needs to run the LLM, score risk,
+    and build the final report — without re-fetching RAG context or re-running
+    the SLM. All fields are JSON-serializable so the bundle survives the
+    triage → `aegis.reports` queue → analysis process boundary.
+    """
+
+    report_id: UUID = Field(..., description="Report identifier carried through to AegisReport")
+    pipeline_start: datetime = Field(..., description="Pipeline start timestamp (UTC)")
+    start_time: float = Field(
+        ..., description="Pipeline start as epoch seconds, used for processing_time_ms"
+    )
+    log: WazuhLog = Field(..., description="Original Wazuh log being analyzed")
+    slm_analysis: SlmResponse = Field(..., description="SLM triage result that escalated this log")
+    rag_context: RagContext = Field(..., description="Asset context fetched during triage")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "report_id": "550e8400-e29b-41d4-a716-446655440000",
+                "pipeline_start": "2026-05-19T14:32:15Z",
+                "start_time": 1747661535.0,
+            }
+        }
+    )
+
+
 class RiskScore(BaseModel):
     """Composite danger score computed in risk_scorer.py."""
 

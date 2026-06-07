@@ -1,11 +1,12 @@
 """
-RabbitMQ consumer for AEGIS pipeline.
+RabbitMQ consumer for AEGIS pipeline — fast triage stage.
 
 Listens to the configured RabbitMQ queue for incoming Wazuh alerts.
 For each message:
 1. Parse JSON → WazuhLog
-2. Call pipeline.process_log()
-3. ACK if success | NACK + requeue if error
+2. Call pipeline.triage_log() (SLM + RAG + gates)
+3. Publish escalated alerts to aegis.reports for the analysis consumer
+4. ACK if success | NACK + requeue if error
 
 Handles connection resilience: reconnect on disconnect.
 Zero cloud calls. On-premise RabbitMQ only.
@@ -19,6 +20,7 @@ from urllib.parse import quote
 import aio_pika
 from aio_pika.abc import (
     AbstractChannel,
+    AbstractExchange,
     AbstractIncomingMessage,
     AbstractQueue,
     AbstractRobustConnection,
@@ -27,12 +29,15 @@ from pydantic import ValidationError
 
 from aegis.llm.client import OllamaClient
 from aegis.middleware.models import WazuhLog
-from aegis.middleware.pipeline import process_log
+from aegis.middleware.pipeline import triage_log
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
-from aegis.soar.client import ShuffleClient
 
 logger = logging.getLogger(__name__)
+
+# Routing key used to hand escalated alerts from the triage stage to the
+# analysis stage — bound to the (already provisioned) aegis.reports queue.
+ESCALATED_ALERT_ROUTING_KEY = "alert.escalated"
 
 
 class RabbitMQConsumer:
@@ -46,14 +51,14 @@ class RabbitMQConsumer:
         rabbitmq_password: str | None = None,
         rabbitmq_vhost: str = "aegis",
         queue_name: str = "aegis.triage",
+        exchange_name: str = "aegis.alerts",
         ollama_base_url: str = "http://10.0.0.1:11434",
         chromadb_host: str = "localhost",
         chromadb_port: int = 8000,
-        shuffle_webhook_url: str = "http://shuffle:3001/api/v1/hooks/",
         metrics: MetricsCollector | None = None,
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
-        llm_timeout: float = 45.0,
+        semaphore: asyncio.Semaphore | None = None,
     ) -> None:
         """
         Initialize RabbitMQ consumer with connection parameters.
@@ -65,14 +70,15 @@ class RabbitMQConsumer:
             rabbitmq_password: RabbitMQ password.
             rabbitmq_vhost: RabbitMQ virtual host.
             queue_name: Queue to listen to (default: aegis.triage).
+            exchange_name: Exchange to publish escalated alerts to (default: aegis.alerts).
             ollama_base_url: Ollama API base URL.
             chromadb_host: ChromaDB server hostname.
             chromadb_port: ChromaDB server port.
-            shuffle_webhook_url: Shuffle SOAR webhook URL.
             metrics: Optional metrics collector for Prometheus reporting.
             suspicion_threshold: Minimum SLM confidence to proceed (default: 0.5).
             slm_timeout: SLM inference timeout in seconds (default: 10).
-            llm_timeout: LLM inference timeout in seconds (default: 45).
+            semaphore: Optional shared semaphore serializing Ollama inference calls
+                across the triage and analysis consumers (see OllamaClient).
         """
         self.rabbitmq_host = rabbitmq_host
         self.rabbitmq_port = rabbitmq_port
@@ -80,20 +86,21 @@ class RabbitMQConsumer:
         self.rabbitmq_password = rabbitmq_password
         self.rabbitmq_vhost = rabbitmq_vhost
         self.queue_name = queue_name
+        self.exchange_name = exchange_name
 
         self.ollama_base_url = ollama_base_url
         self.chromadb_host = chromadb_host
         self.chromadb_port = chromadb_port
-        self.shuffle_webhook_url = shuffle_webhook_url
         self.metrics = metrics
 
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
-        self.llm_timeout = llm_timeout
+        self.semaphore = semaphore
 
         self.connection: AbstractRobustConnection | None = None
         self.channel: AbstractChannel | None = None
         self.queue: AbstractQueue | None = None
+        self.exchange: AbstractExchange | None = None
 
     async def connect(self) -> None:
         """
@@ -131,9 +138,14 @@ class RabbitMQConsumer:
                 passive=True,
             )
 
+            # Resolve the alerts exchange so escalated alerts can be published
+            # onward to the analysis stage (queue aegis.reports).
+            exchange = await channel.get_exchange(self.exchange_name, ensure=True)
+
             self.connection = connection
             self.channel = channel
             self.queue = queue
+            self.exchange = exchange
 
             logger.info(f"Connected to RabbitMQ. Listening to queue: {self.queue_name}")
 
@@ -148,12 +160,11 @@ class RabbitMQConsumer:
         Runs indefinitely until interrupted (SIGTERM/SIGINT).
         Processes each message through the AEGIS pipeline.
         """
-        ollama_client = OllamaClient(self.ollama_base_url)
+        ollama_client = OllamaClient(self.ollama_base_url, semaphore=self.semaphore)
         chromadb_client = ChromaDBClient(self.chromadb_host, self.chromadb_port)
-        shuffle_client = ShuffleClient(self.shuffle_webhook_url)
 
         try:
-            async with ollama_client, chromadb_client, shuffle_client:
+            async with ollama_client, chromadb_client:
                 while True:
                     try:
                         await self.connect()
@@ -168,7 +179,6 @@ class RabbitMQConsumer:
                                     message,
                                     ollama_client,
                                     chromadb_client,
-                                    shuffle_client,
                                 )
 
                     except asyncio.CancelledError:
@@ -187,7 +197,6 @@ class RabbitMQConsumer:
         message: AbstractIncomingMessage,
         ollama_client: OllamaClient,
         chromadb_client: ChromaDBClient,
-        shuffle_client: ShuffleClient,
     ) -> None:
         """
         Handle a single message from RabbitMQ queue.
@@ -196,7 +205,6 @@ class RabbitMQConsumer:
             message: Incoming RabbitMQ message.
             ollama_client: Initialized Ollama client.
             chromadb_client: Initialized ChromaDB client.
-            shuffle_client: Initialized Shuffle client.
         """
         try:
             # Parse message body
@@ -228,34 +236,39 @@ class RabbitMQConsumer:
                 )
             )
 
-            # Sequential processing: one message at a time. Ollama already
-            # serializes inference on the Raspberry Pi, and prefetch_count=1
+            # Sequential processing: one message at a time. prefetch_count=1
             # (set in connect()) keeps the broker from overloading the channel
             # during alert bursts — the backlog stays buffered server-side.
-            # Monitor with Prometheus: aegis_pipeline_duration_seconds p95 > 30s
+            # The shared semaphore (if configured) serializes Ollama calls with
+            # the analysis consumer, but everything else here (RAG fetch, gates)
+            # runs unblocked — that's what keeps triage fast under load.
 
-            # Process through pipeline
-            report = await process_log(
+            # Triage: SLM + RAG + gates
+            escalated = await triage_log(
                 log=log,
                 ollama_client=ollama_client,
                 chromadb_client=chromadb_client,
-                shuffle_client=shuffle_client,
                 metrics=self.metrics,
                 suspicion_threshold=self.suspicion_threshold,
                 slm_timeout=self.slm_timeout,
-                llm_timeout=self.llm_timeout,
             )
 
-            # ACK message
-            await message.ack()
+            if escalated is not None:
+                if self.exchange is None:
+                    raise RuntimeError("Exchange not initialized")
 
-            if report is not None:
+                body = json.dumps(escalated.model_dump(mode="json")).encode("utf-8")
+                escalated_message = aio_pika.Message(body=body, content_type="application/json")
+                await self.exchange.publish(
+                    escalated_message, routing_key=ESCALATED_ALERT_ROUTING_KEY
+                )
+
                 logger.info(
                     json.dumps(
                         {
-                            "event": "report_generated",
+                            "event": "alert_escalated",
                             "alert_id": str(log.id),
-                            "danger_score": report.risk_score.danger_score,
+                            "report_id": str(escalated.report_id),
                         }
                     )
                 )
@@ -268,6 +281,9 @@ class RabbitMQConsumer:
                         }
                     )
                 )
+
+            # ACK message
+            await message.ack()
 
         except json.JSONDecodeError:
             logger.error(

@@ -1,15 +1,20 @@
 """
-AEGIS pipeline orchestration: complete alert processing workflow.
+AEGIS pipeline orchestration: two-stage alert processing workflow.
 
-Processes a single Wazuh log through the full pipeline:
-1. Consume log from RabbitMQ (handled by consumer.py)
-2. Send to SLM TinyLlama → quick suspicion score
-3. Check if is_suspect and confidence > SUSPICION_THRESHOLD
-4. Query ChromaDB → asset context + UEBA
-5. Send to LLM Mistral 7B → detailed threat analysis
+The pipeline is split across two independently-running RabbitMQ consumers so a
+fast SLM triage loop is never blocked behind a slow multi-minute LLM analysis:
+
+Stage 1 — triage_log() (consumer.py, queue aegis.triage):
+1. Send to SLM TinyLlama → quick suspicion score
+2. Check if is_suspect and confidence > SUSPICION_THRESHOLD
+3. Query ChromaDB → asset context + UEBA, apply false-positive gate
+4. Publish an EscalatedAlert bundle to queue aegis.reports (or discard)
+
+Stage 2 — analyze_log() (consumer_analysis.py, queue aegis.reports):
+5. Send to LLM Mistral 7B → detailed threat analysis (with fallback)
 6. Compute composite risk_score (danger_score + uncertainty)
-7. Send final AegisReport to Shuffle SOAR
-8. Return complete report for human review (human-in-the-loop)
+7. Build the final AegisReport and send it to Shuffle SOAR
+8. Return the complete report for human review (human-in-the-loop)
 
 Timing: Measure total time in milliseconds.
 Logging: Structured JSON at each step.
@@ -28,6 +33,7 @@ from aegis.llm.client import OllamaClient
 from aegis.middleware.models import (
     AegisReport,
     Decision,
+    EscalatedAlert,
     LlmResponse,
     SlmResponse,
     WazuhLog,
@@ -44,42 +50,37 @@ from aegis.soar.client import ShuffleClient
 logger = logging.getLogger(__name__)
 
 
-async def process_log(
+async def triage_log(
     log: WazuhLog,
     ollama_client: OllamaClient,
     chromadb_client: ChromaDBClient,
-    shuffle_client: ShuffleClient,
     metrics: MetricsCollector | None = None,
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,
-    llm_timeout: float = 45.0,
-) -> AegisReport | None:
+) -> EscalatedAlert | None:
     """
-    Process a single Wazuh alert through the complete AEGIS pipeline.
+    Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
 
-    Pipeline steps (strict order):
+    Triage steps (strict order):
     1. SLM: Quick suspicion scoring (TinyLlama)
-    2. Gate: If not suspect or low confidence → ACK and return None
+    2. Gate: If not suspect or low confidence → discard, return None
     3. RAG: Fetch asset context + UEBA from ChromaDB
-    4. LLM: Detailed threat analysis (Mistral 7B) with fallback
-    5. Risk: Compute composite danger_score + uncertainty
-    6. Decision: Determine action (always requires human validation in v0.2)
-    7. Report: Create final AegisReport
-    8. SOAR: Send to Shuffle webhook
-    9. Return: Complete report for human review
+    4. Gate: UEBA false-positive filter → discard, return None
+
+    Logs that pass both gates are bundled into an EscalatedAlert for the
+    analysis stage (analyze_log) to pick up from the aegis.reports queue.
 
     Args:
-        log: WazuhLog to process.
-        ollama_client: Initialized OllamaClient for SLM/LLM inference.
+        log: WazuhLog to triage.
+        ollama_client: Initialized OllamaClient for SLM inference.
         chromadb_client: Initialized ChromaDBClient for asset context.
-        shuffle_client: Initialized ShuffleClient for webhook delivery.
+        metrics: Optional metrics collector for Prometheus reporting.
         suspicion_threshold: Minimum confidence to proceed past SLM (default: 0.5).
         slm_timeout: SLM request timeout in seconds (default: 10).
-        llm_timeout: LLM request timeout in seconds (default: 45).
 
     Returns:
-        AegisReport: Complete analysis report, or None if alert was discarded
-                     as benign during SLM gate.
+        EscalatedAlert: Bundle to publish for analysis, or None if the alert
+                        was discarded as benign during triage.
     """
     start_time = time.time()
     total_perf_start = time.perf_counter()
@@ -265,6 +266,65 @@ async def process_log(
             )
         )
         return None
+
+    logger.info(
+        json.dumps(
+            {
+                "event": "triage_escalated",
+                "alert_id": str(log.id),
+                "report_id": str(report_id),
+                "confidence": slm.confidence,
+                "asset_criticality": rag.asset_criticality,
+            }
+        )
+    )
+
+    return EscalatedAlert(
+        report_id=report_id,
+        pipeline_start=pipeline_start,
+        start_time=start_time,
+        log=log,
+        slm_analysis=slm,
+        rag_context=rag,
+    )
+
+
+async def analyze_log(
+    escalated: EscalatedAlert,
+    ollama_client: OllamaClient,
+    shuffle_client: ShuffleClient,
+    metrics: MetricsCollector | None = None,
+    llm_timeout: float = 45.0,
+) -> AegisReport | None:
+    """
+    Run the slow analysis stage of the AEGIS pipeline (LLM + risk + report + SOAR).
+
+    Analysis steps (strict order):
+    1. LLM: Detailed threat analysis (Mistral 7B) with fallback to SLM confidence
+    2. Risk: Compute composite danger_score + uncertainty
+    3. Decision: Determine action (always requires human validation in v0.2)
+    4. Report: Create final AegisReport
+    5. SOAR: Send to Shuffle webhook
+    6. Return: Complete report for human review
+
+    Args:
+        escalated: EscalatedAlert bundle produced by triage_log.
+        ollama_client: Initialized OllamaClient for LLM inference.
+        shuffle_client: Initialized ShuffleClient for webhook delivery.
+        metrics: Optional metrics collector for Prometheus reporting.
+        llm_timeout: LLM request timeout in seconds (default: 45).
+
+    Returns:
+        AegisReport: Complete analysis report, or None if report construction
+                     or risk scoring failed.
+    """
+    log = escalated.log
+    slm = escalated.slm_analysis
+    rag = escalated.rag_context
+    report_id = escalated.report_id
+    pipeline_start = escalated.pipeline_start
+    start_time = escalated.start_time
+    total_perf_start = time.perf_counter()
 
     # ========================================================================
     # STEP 4: LLM - Detailed threat analysis (with fallback)
