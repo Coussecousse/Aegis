@@ -839,3 +839,30 @@ the middleware logs — you should see the triage consumer emitting `slm_complet
 `alert_escalated` for new alerts *while* the analysis consumer is still mid-`llm_start`
 on an earlier one, and the `aegis.reports` queue filling/draining in the RabbitMQ
 management UI (http://localhost:15672 → Queues).
+
+### False positive: "auditd: Device enables promiscuous mode" on the AEGIS host itself
+
+**Cause**: the Wazuh agent on `node1-host` (the host running the AEGIS stack) reports
+rule `80710` (level 10, "Device enables promiscuous mode") whenever `dockerd` creates a
+container network and brings up a `veth...` interface in promiscuous mode. This is
+normal Docker behaviour, not an attack — but the pipeline still escalated it and
+generated a full `AegisReport`, because rule `80710` is a *legitimate* attack indicator
+(network sniffing / lateral movement) when it fires on a monitored business asset.
+
+**Why not just add `80710` to the operational-rules filter** (`_operational_rules` in
+[wazuh_forwarder.py](../../src/aegis/collectors/wazuh_forwarder.py)): that filter exists
+for rules that are *intrinsically* operational (agent lifecycle events, rules
+501/502/503/510-513) regardless of which host they fire on. Rule `80710` is real signal
+on a monitored workstation — filtering it by `rule_id` would blind AEGIS to genuine
+sniffing attempts everywhere, just to silence noise from one host.
+
+**Fix**: filter by *agent name* instead. `WazuhAlertParser.parse_alert()` now accepts an
+`excluded_agents: frozenset[str]` parameter — alerts from those agents are dropped
+before any rule-based logic runs. Set `WAZUH_EXCLUDED_AGENTS` (comma-separated agent
+names, empty/opt-in by default) to the AEGIS infrastructure host's agent name, e.g.:
+
+```bash
+WAZUH_EXCLUDED_AGENTS=node1-host
+```
+
+The same rule on any other agent still reaches the pipeline unaffected.
