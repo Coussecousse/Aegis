@@ -24,7 +24,19 @@ docker --version       # Engine ≥ 24
 docker compose version # Compose ≥ 2.20
 ```
 
-### 3. Environment file
+### 3. Wazuh certs permissions (Linux)
+
+The `wazuh.indexer` container runs as UID 1000. If `docker/node1/wazuh/certs/` is
+owned by your host user with mode `700` (common after `git clone` or volume restore
+on Linux), the indexer fails at boot with `AccessDeniedException: .../certs` and
+the manager/dashboard stay stuck in `Created`. Fix before first startup:
+
+```bash
+chmod 755 docker/node1/wazuh/certs
+chmod 644 docker/node1/wazuh/certs/*.pem docker/node1/wazuh/certs/*.key
+```
+
+### 4. Environment file
 
 The Makefile reads **`.env` at the repo root** (not `docker/node1/.env`).
 Copy from the example and fill in your values:
@@ -49,7 +61,7 @@ docker run --rm wazuh/wazuh-indexer:4.7.5 \
 # Then: docker compose -f docker/node1/docker-compose.yml --env-file .env down -v
 ```
 
-### 4. POC LDAP variables in `.env`
+### 5. POC LDAP variables in `.env`
 
 For the identity sync pipeline add these to root `.env` (already present in `.env.example`):
 
