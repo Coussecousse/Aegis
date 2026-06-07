@@ -849,20 +849,32 @@ normal Docker behaviour, not an attack — but the pipeline still escalated it a
 generated a full `AegisReport`, because rule `80710` is a *legitimate* attack indicator
 (network sniffing / lateral movement) when it fires on a monitored business asset.
 
-**Why not just add `80710` to the operational-rules filter** (`_operational_rules` in
-[wazuh_forwarder.py](../../src/aegis/collectors/wazuh_forwarder.py)): that filter exists
-for rules that are *intrinsically* operational (agent lifecycle events, rules
-501/502/503/510-513) regardless of which host they fire on. Rule `80710` is real signal
-on a monitored workstation — filtering it by `rule_id` would blind AEGIS to genuine
-sniffing attempts everywhere, just to silence noise from one host.
+**Why not filter by `rule_id`**: that would blind AEGIS to genuine sniffing attempts
+everywhere just to silence noise from one host. See `_operational_rules` in
+[wazuh_forwarder.py](../../src/aegis/collectors/wazuh_forwarder.py) — it exists only for
+rules that are *intrinsically* operational (agent lifecycle events 501/502/503/510-513)
+regardless of which host fires them. Rule `80710` is not one of those.
 
-**Fix**: filter by *agent name* instead. `WazuhAlertParser.parse_alert()` now accepts an
-`excluded_agents: frozenset[str]` parameter — alerts from those agents are dropped
-before any rule-based logic runs. Set `WAZUH_EXCLUDED_AGENTS` (comma-separated agent
-names, empty/opt-in by default) to the AEGIS infrastructure host's agent name, e.g.:
+**Why not filter by agent name either** (an approach that shipped briefly and was
+reverted): `node1-host` is not a dedicated AEGIS-infrastructure agent — in this POC's
+topology it is the *only* Wazuh agent, and it monitors both the AEGIS host and the Juice
+Shop attack target. Excluding it by name silently dropped every Kali attack detection
+too (rules 31103/31153/31154/31533 all fire as `agent=node1-host`), causing a total
+detection blackout during a live attack session. Agent-name filtering would only be
+valid in a topology where the AEGIS host has its own dedicated agent, separate from the
+agents monitoring the assets it defends — an assumption that does not hold here and must
+be re-validated against the real deployed topology before ever being re-attempted.
 
-```bash
-WAZUH_EXCLUDED_AGENTS=node1-host
+**Fix**: filter on the *log content* instead — the only axis that actually distinguishes
+"Docker's own veth churn" from "a real sniffing attempt", regardless of which agent or
+host reports it. `WazuhAlertParser.parse_alert()` drops an alert when `rule_id == 80710`
+**and** `full_log` contains the auditd `comm="dockerd"` signature:
+
+```python
+if rule_id == 80710 and 'comm="dockerd"' in full_log:
+    return None
 ```
 
-The same rule on any other agent still reaches the pipeline unaffected.
+The same rule `80710` triggered by any *other* process (a real sniffing tool, a manual
+`ip link set ... promisc on`, etc.) — on `node1-host` or any other agent — still reaches
+the pipeline unaffected.
