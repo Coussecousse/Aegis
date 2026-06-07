@@ -795,3 +795,47 @@ backlog at once.
 message at a time, exactly the throttling the architecture relies on to keep the SLM/LLM
 from being flooded. `connect_robust` already auto-reconnects, so the system self-heals even
 if a burst occurs before the rebuild.
+
+### Decoupled two-stage pipeline (triage / analysis)
+
+**Why**: even with `prefetch_count=1`, a single consumer running the whole pipeline
+sequentially (SLM → RAG → LLM → scoring → report → Shuffle) means the fast SLM triage
+(~16 s after the `num_predict`/`keep_alive` fixes above) sits idle while the LLM spends
+4–6 minutes generating a report for the *previous* alert. During a Kali burst (~900
+messages) this serialization — not SLM throughput — was the real bottleneck.
+
+**Fix**: the pipeline is now split into two independently running consumers connected
+through RabbitMQ:
+
+- **Triage consumer** (`RabbitMQConsumer`, queue `aegis.triage`) runs
+  `pipeline.triage_log()` — SLM call + suspicion gate, RAG fetch, UEBA false-positive
+  gate. Alerts that pass are bundled into an `EscalatedAlert` (Pydantic model in
+  [models.py](../../src/aegis/middleware/models.py)) and published to the `aegis.alerts`
+  exchange with routing key `alert.escalated`, bound to the `aegis.reports` queue
+  (binding declared in
+  [definitions.json](../../docker/node1/rabbitmq/config/definitions.json)).
+- **Analysis consumer** (`RabbitMQAnalysisConsumer`, queue `aegis.reports`, in
+  [consumer_analysis.py](../../src/aegis/middleware/consumer_analysis.py)) runs
+  `pipeline.analyze_log()` — LLM call (with SLM-confidence fallback on timeout), risk
+  scoring, `AegisReport` construction, and the Shuffle SOAR webhook. It does not need a
+  ChromaDB client: the RAG context already travels inside the `EscalatedAlert` bundle.
+
+Both consumers run concurrently via `asyncio.gather()` in
+[`__main__.py`](../../src/aegis/__main__.py), alongside the identity-sync consumer.
+They share:
+
+- a single `asyncio.Semaphore(1)` (passed to both `OllamaClient` instances) so SLM and
+  LLM inference never run *simultaneously* on the CPU-only Pi — the goal is to stop
+  triage from blocking on report generation, not to parallelize inference itself
+  (the two models already total ~5.2 GB resident);
+- a single `MetricsCollector` instance, since Prometheus' global registry rejects
+  duplicate metric registrations.
+
+New env var: `RABBITMQ_REPORTS_QUEUE` (default `aegis.reports`, mirrors
+`RABBITMQ_QUEUE`/`RABBITMQ_IDENTITY_QUEUE` — see `.env.example`).
+
+**To verify the decoupling end-to-end**: run a Kali burst against Juice Shop and watch
+the middleware logs — you should see the triage consumer emitting `slm_complete` /
+`alert_escalated` for new alerts *while* the analysis consumer is still mid-`llm_start`
+on an earlier one, and the `aegis.reports` queue filling/draining in the RabbitMQ
+management UI (http://localhost:15672 → Queues).
