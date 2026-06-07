@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from prometheus_client import start_http_server
 
 from aegis.middleware.consumer import RabbitMQConsumer
+from aegis.middleware.consumer_analysis import build_analysis_consumer_from_env
 from aegis.middleware.consumer_identity import build_identity_consumer_from_env
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.vault.loader import load_secrets_to_env
@@ -124,7 +125,6 @@ async def main() -> None:
 
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://10.0.0.1:11434")
     slm_timeout = float(os.getenv("SLM_TIMEOUT", "10.0"))
-    llm_timeout = float(os.getenv("LLM_TIMEOUT", "45.0"))
     suspicion_threshold = float(os.getenv("SUSPICION_THRESHOLD", "0.5"))
 
     chromadb_host = os.getenv("CHROMADB_HOST", "localhost")
@@ -151,7 +151,13 @@ async def main() -> None:
             "ensure the stack is started with --profile full or override SHUFFLE_WEBHOOK_URL"
         )
 
-    # Initialize consumer
+    # Serialize Ollama inference across the triage and analysis consumers —
+    # the Pi is CPU-only and running both models at once would contend for the
+    # same CPU/RAM. Sharing one semaphore guarantees only one model generates
+    # at a time, while letting the rest of each consumer's loop run unblocked.
+    ollama_semaphore = asyncio.Semaphore(1)
+
+    # Initialize triage consumer (fast loop: SLM + RAG + gates)
     consumer = RabbitMQConsumer(
         rabbitmq_host=rabbitmq_host,
         rabbitmq_port=rabbitmq_port,
@@ -161,19 +167,27 @@ async def main() -> None:
         ollama_base_url=ollama_base_url,
         chromadb_host=chromadb_host,
         chromadb_port=chromadb_port,
-        shuffle_webhook_url=shuffle_webhook_url,
         metrics=metrics_collector,
         suspicion_threshold=suspicion_threshold,
         slm_timeout=slm_timeout,
-        llm_timeout=llm_timeout,
+        semaphore=ollama_semaphore,
     )
 
     identity_consumer = build_identity_consumer_from_env()
 
-    # Start both consumers concurrently — triage pipeline + identity sync
+    # Analysis consumer (slow loop: LLM + risk + report + SOAR) shares the
+    # same MetricsCollector (Prometheus rejects duplicate registrations) and
+    # the same Ollama semaphore as the triage consumer.
+    analysis_consumer = build_analysis_consumer_from_env(
+        metrics=metrics_collector,
+        semaphore=ollama_semaphore,
+    )
+
+    # Start all three consumers concurrently — triage, analysis, identity sync
     try:
         await asyncio.gather(
             consumer.start(),
+            analysis_consumer.start(),
             identity_consumer.start(),
         )
     except KeyboardInterrupt:
