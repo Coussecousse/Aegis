@@ -252,6 +252,7 @@ services:
       BACKEND_HOSTNAME: shuffle-backend
       SHUFFLE_OPENSEARCH_URL: http://shuffle-database:9200
       SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
+      DOCKER_API_VERSION: "1.44"
       SHUFFLE_ENCRYPTION_MODIFIER: ${SHUFFLE_ENCRYPTION_MODIFIER}
       OUTER_HOSTNAME: ${OUTER_HOSTNAME}
     depends_on:
@@ -269,7 +270,7 @@ services:
     environment:
       ENVIRONMENT_NAME: Shuffle
       BASE_URL: http://shuffle-backend:5001
-      DOCKER_API_VERSION: "1.40"
+      DOCKER_API_VERSION: "1.44"
       ORG_ID: ${SHUFFLE_ORG_ID}
       AUTH: ${SHUFFLE_API_KEY}
       SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
