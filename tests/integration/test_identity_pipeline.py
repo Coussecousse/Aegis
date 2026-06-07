@@ -11,7 +11,7 @@ import pytest
 
 from aegis.middleware.consumer_identity import RabbitMQIdentityConsumer
 from aegis.middleware.models import RagContext, UEBAMetrics, WazuhLog
-from aegis.middleware.pipeline import process_log
+from aegis.middleware.pipeline import analyze_log, triage_log
 
 
 class _FakeIdentityConnector:
@@ -74,9 +74,18 @@ class _FakeOllamaClient:
             },
         }
 
-    async def generate(self, model: str, prompt: str, timeout: float) -> dict[str, Any]:
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        timeout: float,
+        keep_alive: int = 300,
+        num_predict: int | None = None,
+    ) -> dict[str, Any]:
         _ = prompt
         _ = timeout
+        _ = keep_alive
+        _ = num_predict
         return self.responses[model]
 
 
@@ -134,10 +143,16 @@ async def test_identity_sync_pipeline_applies_tier0_multiplier_and_human_gate() 
     ollama = _FakeOllamaClient()
     shuffle = _FakeShuffleClient()
 
-    report = await process_log(
+    escalated = await triage_log(
         log=_make_log(),
         ollama_client=ollama,
         chromadb_client=chroma,
+    )
+    assert escalated is not None
+
+    report = await analyze_log(
+        escalated=escalated,
+        ollama_client=ollama,
         shuffle_client=shuffle,
     )
 

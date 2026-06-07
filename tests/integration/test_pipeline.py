@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from aegis.middleware.models import RagContext, UEBAMetrics, WazuhLog
-from aegis.middleware.pipeline import process_log
+from aegis.middleware.models import AegisReport, RagContext, UEBAMetrics, WazuhLog
+from aegis.middleware.pipeline import analyze_log, triage_log
 
 
 class _FakeOllamaClient:
@@ -88,6 +88,34 @@ def _make_rag(tier: str, anomaly_score: float = 0.0) -> RagContext:
     )
 
 
+async def _run_pipeline(
+    log: WazuhLog,
+    ollama_client: _FakeOllamaClient,
+    chromadb_client: _FakeChromaDBClient,
+    shuffle_client: _FakeShuffleClient,
+    suspicion_threshold: float = 0.5,
+    slm_timeout: float = 10.0,
+    llm_timeout: float = 45.0,
+) -> AegisReport | None:
+    """Chain triage_log + analyze_log — mirrors the old single-shot process_log
+    end-to-end so existing scenario assertions stay meaningful across the split."""
+    escalated = await triage_log(
+        log=log,
+        ollama_client=ollama_client,
+        chromadb_client=chromadb_client,
+        suspicion_threshold=suspicion_threshold,
+        slm_timeout=slm_timeout,
+    )
+    if escalated is None:
+        return None
+    return await analyze_log(
+        escalated=escalated,
+        ollama_client=ollama_client,
+        shuffle_client=shuffle_client,
+        llm_timeout=llm_timeout,
+    )
+
+
 @pytest.mark.asyncio
 async def test_pipeline_low_slm_confidence_discards_and_skips_llm() -> None:
     ollama = _FakeOllamaClient(
@@ -116,7 +144,7 @@ async def test_pipeline_low_slm_confidence_discards_and_skips_llm() -> None:
     chroma = _FakeChromaDBClient(_make_rag("tier0"))
     shuffle = _FakeShuffleClient()
 
-    result = await process_log(
+    result = await _run_pipeline(
         log=_make_log(),
         ollama_client=ollama,
         chromadb_client=chroma,
@@ -159,7 +187,7 @@ async def test_pipeline_tier0_high_confidence_results_critical() -> None:
     chroma = _FakeChromaDBClient(_make_rag("tier0"))
     shuffle = _FakeShuffleClient()
 
-    result = await process_log(_make_log(rule_level=12), ollama, chroma, shuffle)
+    result = await _run_pipeline(_make_log(rule_level=12), ollama, chroma, shuffle)
 
     assert result is not None
     assert result.risk_score.danger_score >= 0.8
@@ -197,7 +225,7 @@ async def test_pipeline_tier2_medium_confidence_in_expected_range() -> None:
     chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.4))
     shuffle = _FakeShuffleClient()
 
-    result = await process_log(_make_log(rule_level=8), ollama, chroma, shuffle)
+    result = await _run_pipeline(_make_log(rule_level=8), ollama, chroma, shuffle)
 
     assert result is not None
     assert 0.3 <= result.risk_score.danger_score < 0.8
@@ -222,7 +250,7 @@ async def test_pipeline_llm_timeout_uses_slm_fallback() -> None:
     chroma = _FakeChromaDBClient(_make_rag("tier1"))
     shuffle = _FakeShuffleClient()
 
-    result = await process_log(_make_log(rule_level=10), ollama, chroma, shuffle)
+    result = await _run_pipeline(_make_log(rule_level=10), ollama, chroma, shuffle)
 
     assert result is not None
     assert result.llm_analysis is None
@@ -259,7 +287,7 @@ async def test_pipeline_soar_error_does_not_crash() -> None:
     chroma = _FakeChromaDBClient(_make_rag("tier1"))
     shuffle = _FakeShuffleClient(should_fail=True)
 
-    result = await process_log(_make_log(rule_level=10), ollama, chroma, shuffle)
+    result = await _run_pipeline(_make_log(rule_level=10), ollama, chroma, shuffle)
 
     assert result is not None
     assert result.decision.auto_remediation_allowed is False
