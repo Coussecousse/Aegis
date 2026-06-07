@@ -65,6 +65,27 @@ def test_parse_alert_below_min_level_returns_none() -> None:
     assert parsed is None
 
 
+def test_parse_alert_excluded_agent_returns_none() -> None:
+    payload = _valid_alert()
+
+    parsed = WazuhAlertParser.parse_alert(
+        payload, min_level=7, excluded_agents=frozenset({"pi-test"})
+    )
+
+    assert parsed is None
+
+
+def test_parse_alert_non_excluded_agent_passes() -> None:
+    payload = _valid_alert()
+
+    parsed = WazuhAlertParser.parse_alert(
+        payload, min_level=7, excluded_agents=frozenset({"node1-host"})
+    )
+
+    assert parsed is not None
+    assert parsed.source_agent == "pi-test"
+
+
 @pytest.mark.asyncio
 async def test_forwarder_publishes_to_exchange() -> None:
     published: list[str] = []
