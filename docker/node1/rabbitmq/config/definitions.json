@@ -83,6 +83,14 @@
       "destination_type": "queue",
       "routing_key": "identity.sync",
       "arguments": {}
+    },
+    {
+      "source": "aegis.alerts",
+      "vhost": "aegis",
+      "destination": "aegis.reports",
+      "destination_type": "queue",
+      "routing_key": "alert.escalated",
+      "arguments": {}
     }
   ]
 }
