@@ -41,14 +41,20 @@ class OllamaClientError(RuntimeError):
 class OllamaClient:
     """Async HTTP client for Ollama models (SLM + LLM inference)."""
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, semaphore: asyncio.Semaphore | None = None) -> None:
         """
         Initialize Ollama client.
 
         Args:
             base_url: Base URL of Ollama API (e.g., http://10.0.0.1:11434).
+            semaphore: Optional shared semaphore serializing inference calls. On a
+                CPU-only Raspberry Pi, running the SLM and LLM concurrently from two
+                independent consumers would contend for the same CPU/RAM — pass the
+                same `asyncio.Semaphore(1)` instance to every OllamaClient so only
+                one model generates at a time, regardless of which consumer asks.
         """
         self.base_url = base_url.rstrip("/")
+        self._semaphore = semaphore
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "OllamaClient":
@@ -75,6 +81,10 @@ class OllamaClient:
         Attempts up to 3 times with backoff: 1s, 2s, 4s.
         Parses JSON from response (constrained decoding via format=json).
 
+        When a semaphore was provided at construction, the call is serialized
+        against every other OllamaClient sharing it — see __init__ for why this
+        matters on CPU-only Raspberry Pi inference.
+
         Args:
             model: Model name (e.g., "tinyllama-aegis", "mistral-aegis").
             prompt: Prompt text to send to the model.
@@ -93,6 +103,22 @@ class OllamaClient:
             ValueError: If response is not valid JSON after all retries.
             httpx.HTTPError: If all HTTP requests fail (after 3 retries).
         """
+        if self._semaphore is not None:
+            async with self._semaphore:
+                return await self._generate_with_retry(
+                    model, prompt, timeout, keep_alive, num_predict
+                )
+        return await self._generate_with_retry(model, prompt, timeout, keep_alive, num_predict)
+
+    async def _generate_with_retry(
+        self,
+        model: str,
+        prompt: str,
+        timeout: float,
+        keep_alive: int,
+        num_predict: int | None,
+    ) -> dict[str, Any]:
+        """Send the request to Ollama, retrying with exponential backoff on failure."""
         url = f"{self.base_url}/api/generate"
         payload: dict[str, Any] = {
             "model": model,
