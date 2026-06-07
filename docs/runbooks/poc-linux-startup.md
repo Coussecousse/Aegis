@@ -780,3 +780,18 @@ Then rebuild and restart middleware:
 make docker-build && docker system prune -f
 docker compose -f docker/node1/docker-compose.yml --env-file .env up -d --no-build middleware
 ```
+
+### Consumer crashes with "Unable to nack all messages (N sub-exceptions)"
+
+**Cause**: a Kali scan burst queued ~900 alerts (mostly Auditd "promiscuous mode" events —
+a side effect of network scanning tools) at once. Without `prefetch_count`, RabbitMQ pushed
+the entire backlog onto the consumer's channel. With each pipeline run taking minutes
+(LLM-bound — see above), the channel held hundreds of unacked messages and the broker
+closed it (`ChannelInvalidStateError`); the consumer then crashed trying to nack the whole
+backlog at once.
+
+**Fix**: `channel.set_qos(prefetch_count=1)` in [consumer.py](../../src/aegis/middleware/consumer.py)
+`connect()` — RabbitMQ now holds the backlog server-side (where it's safe) and delivers one
+message at a time, exactly the throttling the architecture relies on to keep the SLM/LLM
+from being flooded. `connect_robust` already auto-reconnects, so the system self-heals even
+if a burst occurs before the rebuild.
