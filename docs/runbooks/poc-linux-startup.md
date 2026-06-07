@@ -743,17 +743,36 @@ sed -i "s/CHANGE_ME_USE_VAULT/$(grep ^WAZUH_API_PASSWORD= .env | cut -d= -f2)/" 
 docker compose -f docker/node1/docker-compose.yml --env-file .env restart wazuh.dashboard
 ```
 
-### SLM (TinyLlama) timeouts on Raspberry Pi
+### SLM/LLM timeouts on Raspberry Pi (CPU-only inference)
 
-**Cause**: default `SLM_TIMEOUT=10` is too short for a cold-start on a Pi.
-TinyLlama typically responds in 15–20 s on first call, then 1–3 s with `keep_alive` active.
+**Cause**: the Pi runs Ollama in pure CPU inference (`/api/ps` reports `size_vram: 0` for
+both models — no GPU offload). Measured throughput on a minimal prompt was **~2 sec/token**
+(12.8 s for 6 tokens, with the model already resident — `load_duration` near 0). At that rate
+a full triage response easily exceeds a 10–30 s timeout. Loading both TinyLlama (0.65 GB) and
+Mistral (4.56 GB) simultaneously — **5.2 GB combined** — also adds memory contention on a
+resource-constrained Pi, which compounds the slowdown.
 
-**Fix**: set in root `.env`:
+**Fix** — three changes work together (already applied in the codebase + `.env`):
+
+1. **Cap SLM output length** so generation time stays bounded — the SLM only needs a small
+   JSON (`is_suspect`/`confidence`/`behavior_category`/`reasoning_short`):
+   `ollama_client.generate(..., num_predict=100)` in [pipeline.py](../../src/aegis/middleware/pipeline.py).
+2. **Free RAM for the SLM hot path** — every alert goes through the SLM (triage), while the
+   LLM only runs on confirmed escalations (rare). The LLM call now passes `keep_alive=60`
+   instead of the 300 s default, so Mistral unloads quickly after a report and stops
+   competing with TinyLlama (which stays resident via `keep_alive=-1`) for CPU/RAM.
+3. **Realistic timeouts** matching measured throughput — set in root `.env`:
 
 ```
-SLM_TIMEOUT=30
-LLM_TIMEOUT=180
+SLM_TIMEOUT=90
+LLM_TIMEOUT=240
 ```
+
+Even 90 s for triage is still far faster than a manual analyst review (the actual MTTT
+baseline this POC compares against), so it does not compromise the "fast alerting" goal —
+it just stops fighting the Pi's real CPU-only throughput. If the LLM still times out, the
+pipeline gracefully falls back to SLM-based risk scoring and the alert still reaches Shuffle
+(see `llm_error` → `fallback: using_slm_confidence` in middleware logs).
 
 Then rebuild and restart middleware:
 
