@@ -31,6 +31,12 @@ class MetricsCollector:
             "aegis_pipeline_duration_seconds",
             "Pipeline and stage durations in seconds",
             labelnames=("stage",),
+            # Default buckets top out at 10s (web-latency scale). The "llm" and
+            # "total" stages routinely take minutes (Mistral 7B inference on
+            # constrained hardware) — every observation would otherwise land in
+            # the +Inf bucket, and histogram_quantile would report that bucket's
+            # lower edge (10) as a false ceiling instead of the real percentile.
+            buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 900, 1200),
             registry=self._registry,
         )
         self.danger_score = Gauge(
