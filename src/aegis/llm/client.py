@@ -67,6 +67,7 @@ class OllamaClient:
         prompt: str,
         timeout: float = 45.0,
         keep_alive: int = 300,
+        num_predict: int | None = None,
     ) -> dict[str, Any]:
         """
         Generate response from Ollama model with exponential retry.
@@ -80,6 +81,10 @@ class OllamaClient:
             timeout: Request timeout in seconds (SLM: 30s, LLM: 180s).
             keep_alive: Seconds to keep model in RAM after last request (default 5 min).
                         Pass -1 to keep indefinitely, 0 to unload immediately.
+            num_predict: Max tokens to generate. On slow CPU-only inference (e.g.
+                         Raspberry Pi), capping this keeps small-JSON responses (SLM
+                         triage) within the timeout instead of running unbounded.
+                         None lets Ollama use its own default.
 
         Returns:
             dict: Parsed JSON response from model.
@@ -89,13 +94,15 @@ class OllamaClient:
             httpx.HTTPError: If all HTTP requests fail (after 3 retries).
         """
         url = f"{self.base_url}/api/generate"
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "stream": False,
             "format": "json",  # constrained decoding — forces valid JSON at the sampler level
             "keep_alive": keep_alive,
         }
+        if num_predict is not None:
+            payload["options"] = {"num_predict": num_predict}
 
         backoff_times = [1.0, 2.0, 4.0]
 

@@ -119,6 +119,9 @@ async def process_log(
             prompt=slm_prompt,
             timeout=slm_timeout,
             keep_alive=-1,  # keep SLM permanently in RAM for low-latency triage
+            # SLM only outputs a small JSON (is_suspect/confidence/category/reason) —
+            # capping generation keeps CPU-only inference within the timeout
+            num_predict=100,
         )
         slm = SlmResponse(**slm_response_dict)
 
@@ -283,6 +286,9 @@ async def process_log(
             model="mistral-aegis",
             prompt=llm_prompt,
             timeout=llm_timeout,
+            # Unload promptly after escalation reports (rare path) so the SLM —
+            # which triages every alert — keeps the Pi's RAM to itself
+            keep_alive=60,
         )
 
         llm = LlmResponse(**llm_response_dict)
