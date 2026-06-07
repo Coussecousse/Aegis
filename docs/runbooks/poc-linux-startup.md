@@ -530,6 +530,24 @@ docker compose -f docker/node1/docker-compose.yml --env-file .env \
 
 Attendre ~2 min. Vérifier : `http://localhost:3001`
 
+> **Le volume `shuffle-apps` ne survit pas à un `down -v` ou un prune agressif.**
+> S'il est vide (`docker exec aegis-node1-shuffle-backend-1 ls /shuffle-apps` ne renvoie rien),
+> l'UI affiche "Couldn't find the app you're looking for" pour `Shuffle Tools` et les autres
+> apps. Recharger les apps avant de configurer un workflow :
+>
+> ```bash
+> docker exec aegis-node1-shuffle-backend-1 sh -c "
+>   cd /tmp && wget -q https://github.com/Shuffle/shuffle-apps/archive/refs/heads/master.tar.gz -O apps.tar.gz &&
+>   tar xzf apps.tar.gz && cp -r python-apps-master/* /shuffle-apps/ &&
+>   rm -rf apps.tar.gz python-apps-master"
+> docker restart aegis-node1-shuffle-backend-1
+> ```
+>
+> Idem pour les **workflows** : ils sont stockés dans `shuffle-database` (OpenSearch) et
+> disparaissent au même titre. Pour ne plus jamais reconfigurer "AEGIS Alerts" à la main :
+> exporter le workflow depuis l'UI (bouton **Export** dans l'éditeur → JSON au schéma Shuffle
+> réel) et le réimporter via **Import** au prochain démarrage.
+
 ### F.2 — Première configuration (done once)
 
 1. Créer un compte admin sur `http://localhost:3001`
