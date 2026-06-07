@@ -548,15 +548,29 @@ Attendre ~2 min. Vérifier : `http://localhost:3001`
 > exporter le workflow depuis l'UI (bouton **Export** dans l'éditeur → JSON au schéma Shuffle
 > réel) et le réimporter via **Import** au prochain démarrage.
 
+> **Docker Engine ≥ 29 (API ≥ 1.44)** : le client Docker embarqué dans Shuffle 1.2.0
+> négocie en API 1.41 et se fait rejeter par le démon (`client version 1.41 is too old.
+> Minimum supported API version is 1.44`). Sans ce correctif, le backend ne peut pas
+> builder les apps ni gérer les conteneurs d'exécution. Le compose force déjà
+> `DOCKER_API_VERSION: "1.44"` sur `shuffle-backend` et `shuffle-orborus` — vérifier que
+> ces variables sont bien présentes si tu modifies le fichier.
+
 ### F.2 — Première configuration (done once)
 
 1. Créer un compte admin sur `http://localhost:3001`
 2. **Apps** → chercher `Shuffle Tools` → l'activer si absent
 3. **New Workflow** → nommer `AEGIS Alerts`
-4. Glisser **Shuffle Tools** sur le canvas → cocher "Starting node"
-5. **Triggers** → glisser **Webhook** → connecter au nœud Shuffle Tools
-6. **Save** → activer le workflow (toggle en haut)
-7. Cliquer sur le Webhook → copier l'URL (`http://shuffle-backend:5001/api/v1/hooks/XXXX`)
+4. Glisser **Shuffle Tools** sur le canvas, puis ajouter un trigger **Webhook**
+   (via la barre de recherche du canvas — l'option "Starting node" et la section
+   "Triggers" séparée n'existent pas dans cette version de l'UI ; le nœud sans
+   connexion entrante sert de point de départ)
+5. **Save** → activer le workflow (toggle en haut)
+6. Cliquer sur le nœud Webhook → copier l'**ID du hook** dans l'URL affichée
+
+> **Important** : l'UI affiche l'URL externe `http://localhost:3001/api/v1/hooks/webhook_XXXX`
+> (via le frontend, port 3001). Le middleware AEGIS tourne dans le réseau Docker interne
+> et doit appeler le **backend** directement — reconstruire l'URL avec le même ID de hook :
+> `http://shuffle-backend:5001/api/v1/hooks/webhook_XXXX`
 
 ### F.3 — Récupérer les identifiants Orborus
 
