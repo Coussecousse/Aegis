@@ -26,17 +26,12 @@ class WazuhAlertParser:
     def parse_alert(
         payload: dict[str, Any],
         min_level: int = 7,
-        excluded_agents: frozenset[str] = frozenset(),
     ) -> WazuhLog | None:
         """Map a Wazuh JSON alert into a validated ``WazuhLog`` instance.
 
         Args:
             payload: Raw Wazuh alert JSON object.
             min_level: Minimum ``rule.level`` required to forward the alert.
-            excluded_agents: Agent names to drop entirely — use this for the AEGIS
-                infrastructure host itself, whose normal Docker activity (e.g.
-                dockerd enabling promiscuous mode on container veth interfaces)
-                trips rules that are real signal on monitored business assets.
 
         Returns:
             ``WazuhLog`` when mapping succeeds and threshold is met, otherwise ``None``.
@@ -80,10 +75,13 @@ class WazuhAlertParser:
         if rule_level < min_level:
             return None
 
-        # Self-monitoring noise: alerts from the AEGIS infrastructure host itself
-        # (e.g. dockerd enabling promiscuous mode on a veth when creating a
-        # container network) — not security signal, regardless of which rule fires.
-        if source_agent in excluded_agents:
+        # Docker's own networking activity: dockerd legitimately enables
+        # promiscuous mode on veth interfaces when creating container networks
+        # (rule 80710). The auditd `comm="dockerd"` signature in the log itself
+        # — not the agent or the rule alone — is what distinguishes this from a
+        # genuine sniffing attempt, so detection stays intact for every other
+        # process, device, and host.
+        if rule_id == 80710 and 'comm="dockerd"' in full_log:
             return None
 
         # Wazuh operational rules: agent lifecycle events, not security alerts
@@ -175,7 +173,6 @@ class WazuhForwarder:
     exchange_name: str = "aegis.alerts"
     routing_key: str = "alert.raw"
     min_level: int = 7
-    excluded_agents: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Initialize non-dataclass runtime attributes."""
@@ -214,9 +211,7 @@ class WazuhForwarder:
         Returns:
             ``True`` when a message was published, ``False`` when skipped or invalid.
         """
-        parsed = WazuhAlertParser.parse_alert(
-            payload, min_level=self.min_level, excluded_agents=self.excluded_agents
-        )
+        parsed = WazuhAlertParser.parse_alert(payload, min_level=self.min_level)
         if parsed is None:
             return False
 

@@ -19,9 +19,6 @@ logger = logging.getLogger(__name__)
 
 def _build_forwarder_from_env() -> WazuhForwarder:
     """Build a ``WazuhForwarder`` using environment configuration."""
-    excluded_agents = frozenset(
-        name.strip() for name in os.getenv("WAZUH_EXCLUDED_AGENTS", "").split(",") if name.strip()
-    )
     return WazuhForwarder(
         rabbitmq_host=os.getenv("RABBITMQ_HOST", "localhost"),
         rabbitmq_port=int(os.getenv("RABBITMQ_PORT", "5672")),
@@ -31,7 +28,6 @@ def _build_forwarder_from_env() -> WazuhForwarder:
         exchange_name="aegis.alerts",
         routing_key="alert.raw",
         min_level=int(os.getenv("WAZUH_MIN_LEVEL", "7")),
-        excluded_agents=excluded_agents,
     )
 
 

@@ -230,7 +230,6 @@ services:
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-aegis}
       WAZUH_ALERTS_FILE: ${WAZUH_ALERTS_FILE:-/var/ossec/logs/alerts/alerts.json}
       WAZUH_MIN_LEVEL: ${WAZUH_MIN_LEVEL:-7}
-      WAZUH_EXCLUDED_AGENTS: ${WAZUH_EXCLUDED_AGENTS:-}
       WAZUH_POLL_INTERVAL: ${WAZUH_POLL_INTERVAL:-1.0}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:

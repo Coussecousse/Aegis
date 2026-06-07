@@ -65,25 +65,33 @@ def test_parse_alert_below_min_level_returns_none() -> None:
     assert parsed is None
 
 
-def test_parse_alert_excluded_agent_returns_none() -> None:
+def test_parse_alert_dockerd_promiscuous_mode_returns_none() -> None:
     payload = _valid_alert()
-
-    parsed = WazuhAlertParser.parse_alert(
-        payload, min_level=7, excluded_agents=frozenset({"pi-test"})
+    payload["rule"]["id"] = "80710"
+    payload["full_log"] = (
+        "type=ANOM_PROMISCUOUS msg=audit(1234567890.123:456): dev=veth9c3b5fc "
+        "prom=256 old_prom=0 auid=4294967295 uid=0 gid=0 ses=4294967295 "
+        'comm="dockerd" exe="/usr/bin/dockerd"'
     )
+
+    parsed = WazuhAlertParser.parse_alert(payload, min_level=7)
 
     assert parsed is None
 
 
-def test_parse_alert_non_excluded_agent_passes() -> None:
+def test_parse_alert_promiscuous_mode_from_other_process_passes() -> None:
     payload = _valid_alert()
-
-    parsed = WazuhAlertParser.parse_alert(
-        payload, min_level=7, excluded_agents=frozenset({"node1-host"})
+    payload["rule"]["id"] = "80710"
+    payload["full_log"] = (
+        "type=ANOM_PROMISCUOUS msg=audit(1234567890.123:456): dev=eth0 "
+        "prom=256 old_prom=0 auid=1000 uid=0 gid=0 ses=3 "
+        'comm="python3" exe="/usr/bin/python3"'
     )
 
+    parsed = WazuhAlertParser.parse_alert(payload, min_level=7)
+
     assert parsed is not None
-    assert parsed.source_agent == "pi-test"
+    assert parsed.rule_id == 80710
 
 
 @pytest.mark.asyncio
