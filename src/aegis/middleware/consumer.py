@@ -118,6 +118,13 @@ class RabbitMQConsumer:
             connection = await aio_pika.connect_robust(connection_url)
             channel = await connection.channel()
 
+            # Hold back the broker's delivery to one unacked message at a time.
+            # Without this, RabbitMQ pushes the entire backlog onto the channel —
+            # during a Kali scan burst this overloaded the channel (~900 messages)
+            # and crashed it (ChannelInvalidStateError) while the slow Pi pipeline
+            # (~6 min/alert, dominated by LLM inference) was still on message #1.
+            await channel.set_qos(prefetch_count=1)
+
             # Attach to the queue provisioned by RabbitMQ definitions.
             queue = await channel.declare_queue(
                 self.queue_name,
@@ -221,13 +228,10 @@ class RabbitMQConsumer:
                 )
             )
 
-            # v0.3 SCALING NOTE:
-            # Sequential processing: one message at a time (v0.2 design).
-            # Ollama already serializes inference on the Raspberry Pi.
-            # To scale up (v0.3) if volume exceeds 100 alerts/min:
-            #   1. channel.set_qos(prefetch_count=3) — buffer 3 messages on the client side
-            #   2. asyncio.Semaphore(1) on Ollama calls — serialize inference
-            #   3. Preload ChromaDB for msg N+1 during msg N inference
+            # Sequential processing: one message at a time. Ollama already
+            # serializes inference on the Raspberry Pi, and prefetch_count=1
+            # (set in connect()) keeps the broker from overloading the channel
+            # during alert bursts — the backlog stays buffered server-side.
             # Monitor with Prometheus: aegis_pipeline_duration_seconds p95 > 30s
 
             # Process through pipeline
