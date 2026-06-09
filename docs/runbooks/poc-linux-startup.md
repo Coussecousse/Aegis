@@ -908,3 +908,46 @@ if rule_id == 80710 and 'comm="dockerd"' in full_log:
 The same rule `80710` triggered by any *other* process (a real sniffing tool, a manual
 `ip link set ... promisc on`, etc.) — on `node1-host` or any other agent — still reaches
 the pipeline unaffected.
+
+### Shuffle `--force-recreate` prend toute la stack avec lui
+
+**Cause** : `docker compose up --force-recreate shuffle-frontend` (sans `--no-deps`) force
+Compose à stopper les dépendants du service en cascade — ce qui peut emporter toute la
+stack principale (RabbitMQ, Wazuh, middleware…) avec lui.
+
+**Règle** : pour les services Shuffle, toujours ajouter `--no-deps` :
+
+```bash
+docker compose -f docker/node1/docker-compose.yml --env-file .env --profile full \
+  up -d --no-deps shuffle-database shuffle-backend shuffle-frontend shuffle-orborus
+```
+
+### Explosion de containers worker Shuffle au redémarrage
+
+**Cause** : chaque alerte dans `aegis.triage` qui atteint Shuffle déclenche un workflow
+qui spawne un container `worker-xxx`. Si la queue s'est accumulée pendant une session
+d'attaque (ex. 37 alertes non traitées), redémarrer la stack fait partir tous les
+workflows en parallèle — le Pi se sature, le SSH lâche, et des containers tombent en
+cascade.
+
+**Avant toute nouvelle session d'attaque**, vérifier la profondeur de la queue et purger
+si nécessaire :
+
+```bash
+# Voir le nombre de messages en attente
+docker exec aegis-node1-rabbitmq-1 rabbitmqctl list_queues -p aegis name messages
+
+# Purger si la queue est trop remplie (via l'API HTTP — rabbitmqctl purge_queue
+# a une syntaxe variable selon la version)
+source .env
+curl -s -u "${RABBITMQ_USER}:${RABBITMQ_PASSWORD}" \
+  -X DELETE "http://localhost:15672/api/queues/aegis/aegis.triage/contents"
+
+# Ou depuis le browser : localhost:15672 → Queues → aegis.triage → bouton Purge
+```
+
+Supprimer les worker containers stoppés après un épisode de saturation :
+
+```bash
+docker ps -a --filter "name=worker-" -q | xargs -r docker rm -f
+```
