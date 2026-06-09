@@ -909,6 +909,20 @@ The same rule `80710` triggered by any *other* process (a real sniffing tool, a 
 `ip link set ... promisc on`, etc.) — on `node1-host` or any other agent — still reaches
 the pipeline unaffected.
 
+### Shuffle frontend affiche "Waiting for database" après un redémarrage de container
+
+**Cause** : nginx dans `shuffle-frontend` résout le hostname `shuffle-backend` une seule
+fois au démarrage. Si le backend a été recréé (nouvelle IP), nginx garde l'ancienne en
+cache et renvoie 502, ce qui fait afficher "Waiting for the Shuffle database" dans l'UI.
+
+**Fix** : recharger nginx sans redémarrer le container :
+
+```bash
+docker exec aegis-node1-shuffle-frontend-1 nginx -s reload
+```
+
+Vérifier ensuite que l'API répond : `curl -s http://localhost:3001/api/v1/docs | head -1`
+
 ### Shuffle `--force-recreate` prend toute la stack avec lui
 
 **Cause** : `docker compose up --force-recreate shuffle-frontend` (sans `--no-deps`) force
