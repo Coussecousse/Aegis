@@ -377,6 +377,36 @@ for m in json.loads(r.read()).get('models', []):
 # Must include: tinyllama-aegis, mistral-aegis
 ```
 
+### C.2 — Exposer les métriques hardware (node_exporter, done once)
+
+`prometheus-node-exporter` expose CPU, RAM, température et d'autres métriques système
+sur le port 9100, que Prometheus (Node1) scrape toutes les 30 s via WireGuard.
+
+**Prérequis** : connexion internet active sur le Pi (désactiver temporairement tout
+blocage réseau si nécessaire, puis le rétablir après l'install).
+
+```bash
+# SSH into the Pi — installer le package Debian (auto-start systemd)
+sudo apt update && sudo apt install -y prometheus-node-exporter
+
+# Vérifier que le service est actif et écoute sur le port 9100
+sudo systemctl status prometheus-node-exporter
+ss -tlnp | grep 9100
+
+# Sanity check : les trois métriques clés utilisées par le dashboard AEGIS
+curl -s http://localhost:9100/metrics | grep -E \
+  "^node_thermal_zone_temp|^node_memory_MemAvailable_bytes|^node_cpu_seconds_total"
+```
+
+**Firewall** : si nftables est actif avec une règle `iifname "wg0" accept` dans la chain
+`input`, le port 9100 est déjà accessible depuis Node1 (10.0.0.2) via WireGuard — aucune
+règle supplémentaire n'est nécessaire.
+
+> **Note température** : `node_thermal_zone_temp{type="cpu-thermal",zone="0"}` renvoie
+> directement des **degrés Celsius** (ex. `50.7`) — node_exporter fait lui-même la
+> conversion depuis les millidegrés du noyau. Les queries Grafana n'ont **pas** à diviser
+> par 1000.
+
 ---
 
 ## Partie D — Juice Shop (cible d'attaque réaliste)
