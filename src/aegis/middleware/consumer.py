@@ -58,7 +58,6 @@ class RabbitMQConsumer:
         metrics: MetricsCollector | None = None,
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
-        semaphore: asyncio.Semaphore | None = None,
     ) -> None:
         """
         Initialize RabbitMQ consumer with connection parameters.
@@ -71,14 +70,12 @@ class RabbitMQConsumer:
             rabbitmq_vhost: RabbitMQ virtual host.
             queue_name: Queue to listen to (default: aegis.triage).
             exchange_name: Exchange to publish escalated alerts to (default: aegis.alerts).
-            ollama_base_url: Ollama API base URL.
+            ollama_base_url: Base URL of the SLM Ollama instance.
             chromadb_host: ChromaDB server hostname.
             chromadb_port: ChromaDB server port.
             metrics: Optional metrics collector for Prometheus reporting.
             suspicion_threshold: Minimum SLM confidence to proceed (default: 0.5).
             slm_timeout: SLM inference timeout in seconds (default: 10).
-            semaphore: Optional shared semaphore serializing Ollama inference calls
-                across the triage and analysis consumers (see OllamaClient).
         """
         self.rabbitmq_host = rabbitmq_host
         self.rabbitmq_port = rabbitmq_port
@@ -95,7 +92,6 @@ class RabbitMQConsumer:
 
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
-        self.semaphore = semaphore
 
         self.connection: AbstractRobustConnection | None = None
         self.channel: AbstractChannel | None = None
@@ -160,7 +156,7 @@ class RabbitMQConsumer:
         Runs indefinitely until interrupted (SIGTERM/SIGINT).
         Processes each message through the AEGIS pipeline.
         """
-        ollama_client = OllamaClient(self.ollama_base_url, semaphore=self.semaphore)
+        ollama_client = OllamaClient(self.ollama_base_url)
         chromadb_client = ChromaDBClient(self.chromadb_host, self.chromadb_port)
 
         try:
@@ -239,9 +235,9 @@ class RabbitMQConsumer:
             # Sequential processing: one message at a time. prefetch_count=1
             # (set in connect()) keeps the broker from overloading the channel
             # during alert bursts — the backlog stays buffered server-side.
-            # The shared semaphore (if configured) serializes Ollama calls with
-            # the analysis consumer, but everything else here (RAG fetch, gates)
-            # runs unblocked — that's what keeps triage fast under load.
+            # This consumer's OllamaClient talks to the dedicated SLM Ollama
+            # instance, so a long-running LLM analysis on the other instance
+            # never blocks triage.
 
             # Triage: SLM + RAG + gates
             escalated = await triage_log(

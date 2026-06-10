@@ -10,7 +10,8 @@ Usage:
 Environment variables required:
     RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASSWORD
     RABBITMQ_QUEUE
-    OLLAMA_BASE_URL, SLM_MODEL, LLM_MODEL, SLM_TIMEOUT, LLM_TIMEOUT
+    OLLAMA_SLM_BASE_URL, OLLAMA_LLM_BASE_URL, SLM_MODEL, LLM_MODEL, SLM_TIMEOUT,
+    LLM_TIMEOUT
     SUSPICION_THRESHOLD
     CHROMADB_HOST, CHROMADB_PORT
     SHUFFLE_WEBHOOK_URL
@@ -123,7 +124,8 @@ async def main() -> None:
     rabbitmq_password = os.getenv("RABBITMQ_PASSWORD", "guest")
     rabbitmq_queue = os.getenv("RABBITMQ_QUEUE", "aegis.wazuh.alerts")
 
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://10.0.0.1:11434")
+    ollama_slm_base_url = os.getenv("OLLAMA_SLM_BASE_URL", "http://10.0.0.1:11434")
+    ollama_llm_base_url = os.getenv("OLLAMA_LLM_BASE_URL", "http://10.0.0.1:11435")
     slm_timeout = float(os.getenv("SLM_TIMEOUT", "10.0"))
     suspicion_threshold = float(os.getenv("SUSPICION_THRESHOLD", "0.5"))
 
@@ -136,7 +138,7 @@ async def main() -> None:
     logging.info(
         f"Configuration loaded: "
         f"RabbitMQ={rabbitmq_host}:{rabbitmq_port}, "
-        f"Ollama={ollama_base_url}, "
+        f"Ollama SLM={ollama_slm_base_url}, Ollama LLM={ollama_llm_base_url}, "
         f"ChromaDB={chromadb_host}:{chromadb_port}, "
         f"Shuffle=******, "
         f"suspicion_threshold={suspicion_threshold}"
@@ -151,16 +153,16 @@ async def main() -> None:
             "ensure the stack is started with --profile full or override SHUFFLE_WEBHOOK_URL"
         )
 
-    # Initialize triage consumer (fast loop: SLM + RAG + gates)
-    # No semaphore — Ollama serializes inference requests internally via its own
-    # queue (OLLAMA_NUM_PARALLEL=1 on the Pi), so a Python-level lock is redundant.
+    # Initialize triage consumer (fast loop: SLM + RAG + gates). Talks to the
+    # dedicated SLM Ollama instance (1 CPU core) so a long-running LLM analysis
+    # on the other instance never blocks triage.
     consumer = RabbitMQConsumer(
         rabbitmq_host=rabbitmq_host,
         rabbitmq_port=rabbitmq_port,
         rabbitmq_user=rabbitmq_user,
         rabbitmq_password=rabbitmq_password,
         queue_name=rabbitmq_queue,
-        ollama_base_url=ollama_base_url,
+        ollama_base_url=ollama_slm_base_url,
         chromadb_host=chromadb_host,
         chromadb_port=chromadb_port,
         metrics=metrics_collector,

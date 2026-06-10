@@ -54,7 +54,6 @@ class RabbitMQAnalysisConsumer:
         shuffle_webhook_url: str = "http://shuffle:3001/api/v1/hooks/",
         metrics: MetricsCollector | None = None,
         llm_timeout: float = 45.0,
-        semaphore: asyncio.Semaphore | None = None,
     ) -> None:
         """
         Initialize the analysis consumer with connection parameters.
@@ -66,14 +65,12 @@ class RabbitMQAnalysisConsumer:
             rabbitmq_password: RabbitMQ password.
             rabbitmq_vhost: RabbitMQ virtual host.
             queue_name: Queue to listen to (default: aegis.reports).
-            ollama_base_url: Ollama API base URL.
+            ollama_base_url: Base URL of the LLM Ollama instance.
             shuffle_webhook_url: Shuffle SOAR webhook URL.
             metrics: Optional metrics collector for Prometheus reporting — should
                 be the SAME instance used by the triage consumer (Prometheus
                 rejects duplicate metric registrations on a shared registry).
             llm_timeout: LLM inference timeout in seconds (default: 45).
-            semaphore: Optional shared semaphore serializing Ollama inference calls
-                across the triage and analysis consumers (see OllamaClient).
         """
         self.rabbitmq_host = rabbitmq_host
         self.rabbitmq_port = rabbitmq_port
@@ -87,7 +84,6 @@ class RabbitMQAnalysisConsumer:
         self.metrics = metrics
 
         self.llm_timeout = llm_timeout
-        self.semaphore = semaphore
 
         self.connection: AbstractRobustConnection | None = None
         self.channel: AbstractChannel | None = None
@@ -126,7 +122,7 @@ class RabbitMQAnalysisConsumer:
 
         Runs the slow LLM analysis stage independently of the triage consumer.
         """
-        ollama_client = OllamaClient(self.ollama_base_url, semaphore=self.semaphore)
+        ollama_client = OllamaClient(self.ollama_base_url)
         shuffle_client = ShuffleClient(self.shuffle_webhook_url)
 
         try:
@@ -261,14 +257,12 @@ class RabbitMQAnalysisConsumer:
 
 def build_analysis_consumer_from_env(
     metrics: MetricsCollector | None = None,
-    semaphore: asyncio.Semaphore | None = None,
 ) -> RabbitMQAnalysisConsumer:
     """Build an analysis consumer instance from environment variables.
 
     Args:
         metrics: Shared MetricsCollector instance (must be the same one passed
             to the triage consumer to avoid duplicate Prometheus registrations).
-        semaphore: Shared semaphore serializing Ollama inference calls.
 
     Returns:
         RabbitMQAnalysisConsumer configured from environment.
@@ -282,9 +276,8 @@ def build_analysis_consumer_from_env(
         rabbitmq_password=os.getenv("RABBITMQ_PASSWORD", "guest"),
         rabbitmq_vhost=os.getenv("RABBITMQ_VHOST", "aegis"),
         queue_name=os.getenv("RABBITMQ_REPORTS_QUEUE", "aegis.reports"),
-        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://10.0.0.1:11434"),
+        ollama_base_url=os.getenv("OLLAMA_LLM_BASE_URL", "http://10.0.0.1:11435"),
         shuffle_webhook_url=os.getenv("SHUFFLE_WEBHOOK_URL", "http://shuffle:3001/api/v1/hooks/"),
         metrics=metrics,
         llm_timeout=float(os.getenv("LLM_TIMEOUT", "45.0")),
-        semaphore=semaphore,
     )
