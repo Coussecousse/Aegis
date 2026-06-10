@@ -5,7 +5,7 @@ The pipeline is split across two independently-running RabbitMQ consumers so a
 fast SLM triage loop is never blocked behind a slow multi-minute LLM analysis:
 
 Stage 1 — triage_log() (consumer.py, queue aegis.triage):
-1. Send to SLM TinyLlama → quick suspicion score
+1. Send to SLM Qwen 2.5 1.5B → quick suspicion score
 2. Check if is_suspect and confidence > SUSPICION_THRESHOLD
 3. Query ChromaDB → asset context + UEBA, apply false-positive gate
 4. Publish an EscalatedAlert bundle to queue aegis.reports (or discard)
