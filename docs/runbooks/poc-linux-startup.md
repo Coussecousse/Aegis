@@ -262,7 +262,7 @@ r = urllib.request.urlopen('http://10.0.0.1:11434/api/tags', timeout=5)
 for m in json.loads(r.read()).get('models', []):
     print(m['name'])
 "
-# Expected: tinyllama-aegis and mistral-aegis in the list
+# Expected: qwen25-aegis and mistral-aegis in the list
 ```
 
 If the models are not listed, run Partie C steps first (see below).
@@ -328,15 +328,15 @@ Replace `PI_USER` and `PI_IP` with your Pi's username and WireGuard IP (e.g. `10
 
 ```bash
 # From the dev machine — copy Modelfiles to the Pi
-scp docs/modelfiles/Modelfile.slm-tinyllama PI_USER@PI_IP:~/
-scp docs/modelfiles/Modelfile.llm-mistral   PI_USER@PI_IP:~/
+scp docs/modelfiles/Modelfile.slm-qwen25  PI_USER@PI_IP:~/
+scp docs/modelfiles/Modelfile.llm-mistral PI_USER@PI_IP:~/
 
 # SSH into the Pi
 ssh PI_USER@PI_IP
 
 # Check base models are present
 ollama list
-# Required: tinyllama:latest, mistral:7b-instruct-q4_K_M
+# Required: qwen2.5:1.5b, mistral:7b-instruct-q4_K_M
 ```
 
 **Make Ollama listen on all interfaces** (required for Node1 to reach it via WireGuard).
@@ -357,12 +357,12 @@ ss -tlnp | grep 11434
 
 ```bash
 # Create AEGIS-tuned model variants
-ollama create tinyllama-aegis -f ~/Modelfile.slm-tinyllama
-ollama create mistral-aegis   -f ~/Modelfile.llm-mistral
+ollama create qwen25-aegis  -f ~/Modelfile.slm-qwen25
+ollama create mistral-aegis -f ~/Modelfile.llm-mistral
 
 # Verify (from the Pi)
 ollama list
-# Must include: tinyllama-aegis, mistral-aegis
+# Must include: qwen25-aegis, mistral-aegis
 ```
 
 **Verify from Node1 host** (curl is not installed in the middleware container):
@@ -374,8 +374,16 @@ r = urllib.request.urlopen('http://PI_IP:11434/api/tags', timeout=5)
 for m in json.loads(r.read()).get('models', []):
     print(m['name'])
 "
-# Must include: tinyllama-aegis, mistral-aegis
+# Must include: qwen25-aegis, mistral-aegis
 ```
+
+> **Air-gapped Pi note**: `ollama create <name> -f Modelfile` with a `FROM <model>`
+> directive triggers a manifest check against `registry.ollama.ai`, even if the base
+> model is already present locally — this fails with no DNS/internet. Either pull the
+> base model once with internet temporarily enabled (`echo "nameserver 8.8.8.8" | sudo
+> tee /etc/resolv.conf`, `ollama pull qwen2.5:1.5b`, then restore the normal
+> `/etc/resolv.conf` and disable internet again), or point `FROM` at the local digest
+> via `ollama show qwen2.5:1.5b --modelfile | grep "^FROM"`.
 
 ### C.2 — Exposer les métriques hardware (node_exporter, done once)
 
@@ -778,20 +786,14 @@ docker compose -f docker/node1/docker-compose.yml --env-file .env restart wazuh.
 **Cause**: the Pi runs Ollama in pure CPU inference (`/api/ps` reports `size_vram: 0` for
 both models — no GPU offload). Measured throughput on a minimal prompt was **~2 sec/token**
 (12.8 s for 6 tokens, with the model already resident — `load_duration` near 0). At that rate
-a full triage response easily exceeds a 10–30 s timeout. Loading both TinyLlama (0.65 GB) and
-Mistral (4.56 GB) simultaneously — **5.2 GB combined** — also adds memory contention on a
-resource-constrained Pi, which compounds the slowdown.
+a full triage response easily exceeds a 10–30 s timeout.
 
-**Fix** — three changes work together (already applied in the codebase + `.env`):
+**Fix** — two changes work together (already applied in the codebase + `.env`):
 
 1. **Cap SLM output length** so generation time stays bounded — the SLM only needs a small
-   JSON (`is_suspect`/`confidence`/`behavior_category`/`reasoning_short`):
-   `ollama_client.generate(..., num_predict=100)` in [pipeline.py](../../src/aegis/middleware/pipeline.py).
-2. **Free RAM for the SLM hot path** — every alert goes through the SLM (triage), while the
-   LLM only runs on confirmed escalations (rare). The LLM call now passes `keep_alive=60`
-   instead of the 300 s default, so Mistral unloads quickly after a report and stops
-   competing with TinyLlama (which stays resident via `keep_alive=-1`) for CPU/RAM.
-3. **Realistic timeouts** matching measured throughput — set in root `.env`:
+   JSON (`is_suspect`/`confidence`/`behavior_category`/`reasoning_short`/`raw_probabilities`):
+   `ollama_client.generate(..., num_predict=180)` in [pipeline.py](../../src/aegis/middleware/pipeline.py).
+2. **Realistic timeouts** matching measured throughput — set in root `.env`:
 
 ```
 SLM_TIMEOUT=90
@@ -803,6 +805,9 @@ baseline this POC compares against), so it does not compromise the "fast alertin
 it just stops fighting the Pi's real CPU-only throughput. If the LLM still times out, the
 pipeline gracefully falls back to SLM-based risk scoring and the alert still reaches Shuffle
 (see `llm_error` → `fallback: using_slm_confidence` in middleware logs).
+
+Both models now run with `keep_alive=-1` (kept resident in RAM indefinitely) — see
+"SLM model swap: TinyLlama → Qwen 2.5 1.5B" below for why this is safe on a 16 GB Pi.
 
 Then rebuild and restart middleware:
 
@@ -852,14 +857,9 @@ through RabbitMQ:
 
 Both consumers run concurrently via `asyncio.gather()` in
 [`__main__.py`](../../src/aegis/__main__.py), alongside the identity-sync consumer.
-They share:
-
-- a single `asyncio.Semaphore(1)` (passed to both `OllamaClient` instances) so SLM and
-  LLM inference never run *simultaneously* on the CPU-only Pi — the goal is to stop
-  triage from blocking on report generation, not to parallelize inference itself
-  (the two models already total ~5.2 GB resident);
-- a single `MetricsCollector` instance, since Prometheus' global registry rejects
-  duplicate metric registrations.
+They share a single `MetricsCollector` instance, since Prometheus' global registry
+rejects duplicate metric registrations. There is no Ollama-call serialization at the
+Python level (see "SLM model swap" below for how concurrency is now handled).
 
 New env var: `RABBITMQ_REPORTS_QUEUE` (default `aegis.reports`, mirrors
 `RABBITMQ_QUEUE`/`RABBITMQ_IDENTITY_QUEUE` — see `.env.example`).
@@ -869,6 +869,44 @@ the middleware logs — you should see the triage consumer emitting `slm_complet
 `alert_escalated` for new alerts *while* the analysis consumer is still mid-`llm_start`
 on an earlier one, and the `aegis.reports` queue filling/draining in the RabbitMQ
 management UI (http://localhost:15672 → Queues).
+
+### SLM model swap: TinyLlama → Qwen 2.5 1.5B
+
+**Cause**: TinyLlama 1.1B always returned the same `confidence: 0.88` /
+`behavior_category: lateral_movement` regardless of the alert content — a 1.1B model is
+too small to reason from data and instead copies the example values baked into
+`Modelfile.slm-tinyllama` verbatim.
+
+**Fix**: switched the SLM to **Qwen 2.5 1.5B** (Apache 2.0) — still small enough for
+CPU-only inference on the Pi (~1 GB RAM, ~8-18 s per triage when idle) but noticeably
+better at following a JSON schema and reasoning over the actual alert fields. New
+Modelfile: [Modelfile.slm-qwen25](../modelfiles/Modelfile.slm-qwen25).
+
+- `SLM_MODEL`/`LLM_MODEL` are now read from the environment in
+  [pipeline.py](../../src/aegis/middleware/pipeline.py) (`_SLM_MODEL`/`_LLM_MODEL`
+  module constants, defaulting to `qwen25-aegis`/`mistral-aegis`) — switching models no
+  longer requires a code change, only `.env` + `ollama create`.
+- Both models now run with `keep_alive=-1`. The Pi has 16 GB RAM; Qwen 2.5 1.5B (~1 GB)
+  and Mistral 7B Q4 (~4.5 GB) fit simultaneously with no swap, so there's no need to
+  unload the LLM between reports.
+
+**Qwen echo bug**: with the old prompt format (`Rule: ... | Level: ...`), Qwen 2.5
+echoed the input alert back as JSON (`{"rule_id": ..., "rule_level": ...}`) instead of
+producing the triage schema — `format: "json"` in Ollama's `/api/generate` only enforces
+*valid JSON*, not a specific schema, so a small model can "satisfy" it by reformatting
+the input. Fixed by:
+- rewriting `Modelfile.slm-qwen25`'s `SYSTEM` directives onto single lines (multi-line
+  `SYSTEM { ... }` blocks are unreliable), and
+- rewriting `build_slm_prompt()` in
+  [prompt_builder.py](../../src/aegis/middleware/prompt_builder.py) with explicit
+  `ALERT DATA: ...` / `OUTPUT: JSON triage with fields ...` framing, so the model can no
+  longer mistake "the data" for "the requested output".
+
+**`OLLAMA_NUM_PARALLEL`**: tested `OLLAMA_NUM_PARALLEL=2` (to let SLM and LLM run
+concurrently) after removing the semaphore, but on the Pi's 4 ARM cores both inferences
+slowed down/timed out simultaneously — worse than serial. Reverted to
+`OLLAMA_NUM_PARALLEL=1` (Ollama's default internal queue serializes requests; each one
+still runs at full speed once it's its turn).
 
 ### False positive: "auditd: Device enables promiscuous mode" on the AEGIS host itself
 

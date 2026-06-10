@@ -1,7 +1,7 @@
 # Raspberry Pi - Ollama Configuration & LLM Response Format
 
 > **Version**: 0.2.0
-> **Purpose**: Configure Ollama on Raspberry Pi (WireGuard node) to serve SLM (TinyLlama) and LLM (Mistral 7B) for the AEGIS pipeline
+> **Purpose**: Configure Ollama on Raspberry Pi (WireGuard node) to serve SLM (Qwen 2.5 1.5B) and LLM (Mistral 7B) for the AEGIS pipeline
 > **Network**: Accessible via WireGuard tunnel only — IP `10.0.0.1`
 
 ---
@@ -55,8 +55,8 @@ Security note: The Raspberry Pi nftables firewall allows only WireGuard UDP 5182
 ## Step 2: Pull Required Models
 
 ```bash
-# SLM: TinyLlama (1.1B parameters, ~600MB)
-ollama pull tinyllama
+# SLM: Qwen 2.5 1.5B (~1GB, Apache 2.0)
+ollama pull qwen2.5:1.5b
 
 # LLM: Mistral 7B Q4 (quantized, ~4GB)
 ollama pull mistral
@@ -73,7 +73,7 @@ Expected output:
 ```
 NAME          ID              SIZE     MODIFIED
 mistral       ...             4.1 GB   ...
-tinyllama     ...             637 MB   ...
+qwen2.5:1.5b  ...             986 MB   ...
 ```
 
 ---
@@ -84,8 +84,8 @@ Copy the official Modelfiles to the Raspberry Pi by hand, then deploy them.
 
 ```bash
 # On the Raspberry Pi
-ollama create tinyllama-aegis -f ~/Modelfile.slm
-ollama create mistral-aegis -f ~/Modelfile.llm
+ollama create qwen25-aegis -f ~/Modelfile.slm-qwen25
+ollama create mistral-aegis -f ~/Modelfile.llm-mistral
 ```
 
 Verify that both models are present:
@@ -98,14 +98,14 @@ ollama list
 
 ## Step 4: Test Models via HTTP API
 
-### Test SLM (TinyLlama)
+### Test SLM (Qwen 2.5 1.5B)
 
 ```bash
 curl -X POST http://10.0.0.1:11434/api/generate \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "tinyllama-aegis",
-    "prompt": "{\"rule_id\": 1234, \"rule_level\": 8, \"full_log\": \"net.exe user admin /add\"}",
+    "model": "qwen25-aegis",
+    "prompt": "ALERT DATA:\nrule_id=1234 level=8/15\ndescription=Account creation\nagent=DC-01 ip=10.0.0.5\ndecoder=windows-eventlog mitre=T1136\nraw_log=net.exe user admin /add\n\nOUTPUT: JSON triage with fields is_suspect, confidence, behavior_category, reasoning_short, raw_probabilities.",
     "stream": false
   }'
 ```
@@ -146,7 +146,7 @@ The middleware will connect via:
 
 ```python
 OLLAMA_BASE_URL = "http://10.0.0.1:11434"
-SLM_MODEL = "tinyllama-aegis"
+SLM_MODEL = "qwen25-aegis"
 LLM_MODEL = "mistral-aegis"
 ```
 
@@ -185,17 +185,17 @@ The model may be ignoring the Modelfile system prompt. Verify:
 
 ```bash
 # Check the Modelfile was applied
-ollama show tinyllama-aegis
+ollama show qwen25-aegis
 ```
 
 If the system prompt is missing:
-1. Re-create the model: `ollama rm tinyllama-aegis`
-2. Re-deploy: `ollama create tinyllama-aegis -f /path/to/Modelfile.slm`
+1. Re-create the model: `ollama rm qwen25-aegis`
+2. Re-deploy: `ollama create qwen25-aegis -f /path/to/Modelfile.slm-qwen25`
 
 ### Response too long / truncated
 
 Adjust `PARAMETER num_predict` in the Modelfile:
-- **SLM (TinyLlama)**: 200-300 tokens (JSON ~200 tokens)
+- **SLM (Qwen 2.5 1.5B)**: 150-200 tokens (JSON ~180 tokens)
 - **LLM (Mistral)**: 400-500 tokens (JSON + explanation ~400 tokens)
 
 ---

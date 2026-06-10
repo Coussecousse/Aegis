@@ -19,7 +19,7 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 
 1. Wazuh agents collect logs from endpoints, Active Directory, firewall devices, and databases.
 2. Logs are buffered in RabbitMQ to absorb peaks and prevent overload during an attack.
-3. TinyLlama (local SLM) performs first-pass triage and classifies events as normal or suspicious.
+3. Qwen 2.5 1.5B (local SLM) performs first-pass triage and classifies events as normal or suspicious.
 4. If suspicious: the middleware queries ChromaDB (local vector database) to retrieve the business
   context of the targeted asset — its name, role, and criticality level.
 5. Mistral 7B (local LLM) combines the raw log, the asset context from ChromaDB, and the threat
@@ -42,7 +42,7 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 | Language | Python | 3.12 |
 | SIEM / Collection | Wazuh Manager | 4.7 |
 | Message Broker | RabbitMQ | 3.12 |
-| Local AI (triage) | Ollama — TinyLlama | 1.1B |
+| Local AI (triage) | Ollama — Qwen 2.5 | 1.5B |
 | Local AI (reports) | Ollama — Mistral | 7B Q4 |
 | Vector DB / RAG | ChromaDB | 0.4.x |
 | SOAR | Shuffle SOAR | 1.2 |
@@ -62,7 +62,7 @@ Prometheus, Grafana. All services run in Docker on an isolated
 internal network with zero outbound internet access.
 
 **Node 2 — AI Appliance** (Raspberry Pi 5, 16 GB RAM, ARM)
-Hosts: Ollama with TinyLlama 1.1B (triage) and Mistral 7B Q4
+Hosts: Ollama with Qwen 2.5 1.5B (triage) and Mistral 7B Q4
 (incident reports). No Docker required — Ollama runs as a native
 service. Node 1 reaches it via HTTP on the local network.
 

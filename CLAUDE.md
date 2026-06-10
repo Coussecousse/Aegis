@@ -20,7 +20,7 @@ that require explicit human validation before execution. No data ever leaves the
 | Language | Python | 3.12 |
 | SIEM / Collection | Wazuh Manager | 4.7 |
 | Message Broker | RabbitMQ | 3.12 |
-| Local AI (triage) | Ollama — TinyLlama | 1.1B |
+| Local AI (triage) | Ollama — Qwen 2.5 | 1.5B |
 | Local AI (reports) | Ollama — Mistral | 7B Q4 |
 | Vector DB / RAG | ChromaDB | 0.4.x |
 | SOAR | Shuffle SOAR | 1.2 |

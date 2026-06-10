@@ -40,8 +40,8 @@ WireGuard IP : 10.0.0.1  (accessible via tunnel wg-aegis only)
 SSH          : ssh kika@10.0.0.1
 Firewall     : nftables strict (WireGuard UDP 51820 only outbound)
 Ollama ARM   : OLLAMA_HOST=0.0.0.0:11434 (systemd override required)
-  tinyllama-aegis  → SLM triage  (TinyLlama 1.1B, timeout 10s)
-  mistral-aegis    → LLM analysis (Mistral 7B Q4, timeout 45s)
+  qwen25-aegis     → SLM triage  (Qwen 2.5 1.5B, timeout 90s)
+  mistral-aegis    → LLM analysis (Mistral 7B Q4, timeout 240s)
 ```
 
 ### Developer environment
@@ -56,10 +56,10 @@ No environment-specific assumptions should be hardcoded anywhere in the project.
 
 ```
 1. WazuhLog ← RabbitMQ consumer (aio-pika)
-2. SLM TinyLlama → SlmResponse (timeout 10s)
+2. SLM Qwen 2.5 1.5B → SlmResponse (timeout 90s)
 3. Gate: confidence < 0.5 → ACK, discard (~90% of alerts filtered here)
 4. ChromaDB → RagContext + UEBAMetrics (asset metadata + behavioral baselines)
-5. LLM Mistral 7B → LlmResponse (timeout 45s, fallback to SLM if timeout)
+5. LLM Mistral 7B → LlmResponse (timeout 240s, fallback to SLM if timeout)
 6. risk_scorer → danger_score
    formula : (SLM×0.30 + LLM×0.50 + rule_level/15×0.20) × criticality_multiplier
    tiers   : tier0=1.5 | tier1=1.2 | tier2=1.0 | clamp [0.0, 1.0]
@@ -102,7 +102,7 @@ No environment-specific assumptions should be hardcoded anywhere in the project.
 | `vault/loader.py` | ✅ Runtime secrets loader into environment |
 | `__main__.py` | ✅ Entry point, loads Vault secrets and starts metrics endpoint |
 | `Modelfile.llm-mistral` | ✅ temperature 0.3, neutral system prompt |
-| `Modelfile.slm-tinyllama` | ✅ temperature 0.3, fast binary classifier |
+| `Modelfile.slm-qwen25` | ✅ temperature 0.35, structured JSON triage classifier |
 | `docker-compose.yml` (node1) | ✅ middleware + collector service + monitoring wiring |
 | `local_rules.xml` | ✅ 18 custom rules (IDs 100001–100042) |
 | `test_models.py` | ✅ Coverage ≥ 80% |
