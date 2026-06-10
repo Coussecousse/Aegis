@@ -1,58 +1,151 @@
 # Raspberry Pi - Ollama Configuration & LLM Response Format
 
-> **Version**: 0.2.0
-> **Purpose**: Configure Ollama on Raspberry Pi (WireGuard node) to serve SLM (Qwen 2.5 1.5B) and LLM (Mistral 7B) for the AEGIS pipeline
+> **Version**: 0.3.0
+> **Purpose**: Configure two partitioned Ollama instances on the Raspberry Pi (WireGuard
+> node) — one for SLM triage (Qwen 2.5 1.5B), one for LLM analysis (Mistral 7B) — for
+> the AEGIS pipeline
 > **Network**: Accessible via WireGuard tunnel only — IP `10.0.0.1`
+
+---
+
+## Architecture: Two Partitioned Ollama Instances
+
+A single shared Ollama instance means a 5-10 minute LLM analysis and SLM triage compete
+for the same CPU and the same request queue — in practice this fully serializes them,
+so triage stalls and the `aegis.triage` queue backs up for the entire duration of an
+LLM analysis.
+
+To avoid this, the Raspberry Pi 5 (4 cores) runs **two independent `ollama serve`
+processes**, each pinned to its own CPU cores via systemd `AllowedCPUs`:
+
+| Instance | Port | CPU cores | Model | Used by |
+|---|---|---|---|---|
+| `ollama-slm` | 11434 | 1 (core 0) | `qwen25-aegis` (Qwen 2.5 1.5B) | Triage consumer (`aegis.triage`) |
+| `ollama-llm` | 11435 | 3 (cores 1-3) | `mistral-aegis` (Mistral 7B Q4) | Analysis consumer (`aegis.reports`) |
+
+Both processes share the same model store (read-only access, no conflicts) and are
+reachable over WireGuard at `10.0.0.1:11434` and `10.0.0.1:11435`. The AEGIS middleware
+points each consumer at its own instance via `OLLAMA_SLM_BASE_URL` /
+`OLLAMA_LLM_BASE_URL` (see `.env.example`) — there is no shared lock between them.
 
 ---
 
 ## Prerequisites
 
-- Raspberry Pi 5 (16 GB RAM)
-- Ollama installed (https://ollama.ai)
+- Raspberry Pi 5 (16 GB RAM, 4 cores)
+- Ollama installed (https://ollama.ai) — the official installer creates a single
+  `ollama.service` systemd unit, which this guide replaces with two instances
 - WireGuard configured and active on the Raspberry Pi
 - Network connectivity verified: `ping 10.0.0.1` from the main AEGIS node
 
 ---
 
-## Step 1: Configure Ollama Network Binding
+## Step 1: Disable the Default Single-Instance Service
 
-### Critical: Make Ollama Listen on WireGuard Interface
-
-By default, Ollama listens only on `127.0.0.1:11434` (localhost). Since the Raspberry Pi is accessed via WireGuard tunnel (`10.0.0.1`), Ollama must bind to `0.0.0.0` to accept requests on the WireGuard interface.
-
-#### Option A: systemd service (recommended)
-
-Edit the Ollama systemd service:
+The official installer's `ollama.service` listens on `127.0.0.1:11434` by default.
+Stop and disable it — `ollama-slm` (below) takes over port 11434:
 
 ```bash
-sudo systemctl edit ollama
+sudo systemctl disable --now ollama
 ```
 
-Add or update the environment section:
-
-```ini
-[Service]
-Environment="OLLAMA_HOST=0.0.0.0:11434"
-```
-
-Restart Ollama:
+Note the `ExecStart`, `User` and `Group` from the existing unit — the two new units
+reuse them:
 
 ```bash
-sudo systemctl restart ollama
+systemctl cat ollama
 ```
 
-Verify:
-
-```bash
-curl http://10.0.0.1:11434/api/tags
-```
-
-Security note: The Raspberry Pi nftables firewall allows only WireGuard UDP 51820 outbound. Ollama is reachable only from the tunnel (10.0.0.0/24). There is no direct Internet access.
+(The official installer typically uses `ExecStart=/usr/local/bin/ollama serve`,
+`User=ollama`, `Group=ollama`. Adjust the units below if your Pi differs.)
 
 ---
 
-## Step 2: Pull Required Models
+## Step 2: Create the SLM and LLM systemd Units
+
+### `/etc/systemd/system/ollama-slm.service`
+
+```ini
+[Unit]
+Description=Ollama SLM instance (triage, Qwen 2.5 1.5B)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+AllowedCPUs=0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### `/etc/systemd/system/ollama-llm.service`
+
+```ini
+[Unit]
+Description=Ollama LLM instance (analysis, Mistral 7B Q4)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+Environment="OLLAMA_HOST=0.0.0.0:11435"
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+AllowedCPUs=1-3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`AllowedCPUs` is a cgroup v2 `cpuset` directive (systemd ≥ 244, the default on
+Debian 13) — it confines each process to the listed cores. `CPUAffinity=` is an
+older `sched_setaffinity`-based alternative with the same effect if `AllowedCPUs`
+is unavailable on your systemd version.
+
+Both units omit `OLLAMA_MODELS`, so they default to the same model store
+(`/usr/share/ollama/.ollama/models` when running as the `ollama` user) — `ollama
+serve` only reads model files during inference, so two instances can share the
+store safely.
+
+Enable and start both:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ollama-slm ollama-llm
+```
+
+Security note: The Raspberry Pi nftables firewall allows only WireGuard UDP 51820
+outbound. Both instances are reachable only from the tunnel (10.0.0.0/24). There is
+no direct Internet access.
+
+---
+
+## Step 3: Verify Network Binding and CPU Pinning
+
+```bash
+# Both instances listening on all interfaces
+ss -tlnp | grep -E '11434|11435'
+
+# From the AEGIS node, over WireGuard
+curl http://10.0.0.1:11434/api/tags
+curl http://10.0.0.1:11435/api/tags
+
+# CPU pinning took effect
+systemctl show ollama-slm -p AllowedCPUs
+systemctl show ollama-llm -p AllowedCPUs
+cat /sys/fs/cgroup/system.slice/ollama-slm.service/cpuset.cpus.effective
+cat /sys/fs/cgroup/system.slice/ollama-llm.service/cpuset.cpus.effective
+```
+
+---
+
+## Step 4: Pull Required Models
 
 ```bash
 # SLM: Qwen 2.5 1.5B (~1GB, Apache 2.0)
@@ -62,7 +155,7 @@ ollama pull qwen2.5:1.5b
 ollama pull mistral
 ```
 
-Verify both models are loaded:
+Verify both models are loaded (either instance — they share the model store):
 
 ```bash
 ollama list
@@ -78,7 +171,7 @@ qwen2.5:1.5b  ...             986 MB   ...
 
 ---
 
-## Step 3: Deploy Custom Modelfiles
+## Step 5: Deploy Custom Modelfiles
 
 Copy the official Modelfiles to the Raspberry Pi by hand, then deploy them.
 
@@ -96,9 +189,9 @@ ollama list
 
 ---
 
-## Step 4: Test Models via HTTP API
+## Step 6: Test Models via HTTP API
 
-### Test SLM (Qwen 2.5 1.5B)
+### Test SLM (Qwen 2.5 1.5B) — `ollama-slm`, port 11434
 
 ```bash
 curl -X POST http://10.0.0.1:11434/api/generate \
@@ -118,10 +211,10 @@ Expected response (JSON only):
 }
 ```
 
-### Test LLM (Mistral)
+### Test LLM (Mistral) — `ollama-llm`, port 11435
 
 ```bash
-curl -X POST http://10.0.0.1:11434/api/generate \
+curl -X POST http://10.0.0.1:11435/api/generate \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mistral-aegis",
@@ -140,12 +233,13 @@ Expected response (JSON only):
 
 ---
 
-## Step 5: Connection from AEGIS Middleware
+## Step 7: Connection from AEGIS Middleware
 
-The middleware will connect via:
+The middleware connects each consumer to its own instance via:
 
 ```python
-OLLAMA_BASE_URL = "http://10.0.0.1:11434"
+OLLAMA_SLM_BASE_URL = "http://10.0.0.1:11434"  # triage consumer (qwen25-aegis)
+OLLAMA_LLM_BASE_URL = "http://10.0.0.1:11435"  # analysis consumer (mistral-aegis)
 SLM_MODEL = "qwen25-aegis"
 LLM_MODEL = "mistral-aegis"
 ```
@@ -153,11 +247,11 @@ LLM_MODEL = "mistral-aegis"
 ### In `src/aegis/llm/client.py`:
 
 ```python
-# The OllamaClient will:
-# 1. POST to http://10.0.0.1:11434/api/generate
-# 2. Pass the model name and prompt
-# 3. Parse JSON response from the Modelfile-trained model
-# 4. Retry on timeout (SLM: 10s | LLM: 45s)
+# Each OllamaClient is constructed with a single instance's base_url and:
+# 1. POSTs to {base_url}/api/generate
+# 2. Passes the model name and prompt
+# 3. Parses JSON response from the Modelfile-trained model
+# 4. Retries on timeout (SLM: 10s | LLM: 45s)
 ```
 
 ---
@@ -170,14 +264,28 @@ LLM_MODEL = "mistral-aegis"
 # From AEGIS host, test WireGuard connectivity
 ping 10.0.0.1
 
-# Test Ollama HTTP API
+# Test Ollama HTTP API (SLM and LLM)
 curl -v http://10.0.0.1:11434/api/tags
+curl -v http://10.0.0.1:11435/api/tags
 ```
 
 If connection fails:
 1. Verify WireGuard is active on Raspberry: `sudo wg show`
-2. Check Ollama is listening on `0.0.0.0`: `ss -tlnp | grep 11434`
-3. Check firewall rules (Raspberry Pi): `sudo nft list ruleset`
+2. Check both instances are listening on `0.0.0.0`: `ss -tlnp | grep -E '11434|11435'`
+3. Check unit status: `systemctl status ollama-slm ollama-llm`
+4. Check firewall rules (Raspberry Pi): `sudo nft list ruleset`
+
+### One instance is slow despite CPU partitioning
+
+Confirm `AllowedCPUs` actually took effect (see Step 3) — if `cpuset.cpus.effective`
+shows all cores for both units, the cgroup v2 `cpuset` controller may not be
+delegated to `system.slice`. Check with:
+
+```bash
+cat /sys/fs/cgroup/system.slice/cgroup.controllers
+```
+
+`cpuset` must appear in the list.
 
 ### Model returns non-JSON response
 
@@ -202,7 +310,10 @@ Adjust `PARAMETER num_predict` in the Modelfile:
 
 ## Performance Notes
 
-- **Raspberry Pi 5 (16 GB RAM)**: SLM ~2-4 alerts/sec | LLM ~0.5-1 alert/sec
+- **SLM instance (1 core)**: Qwen 2.5 1.5B, ~8-18s per triage call
+- **LLM instance (3 cores)**: Mistral 7B Q4, ~5-10 min per analysis call
+- Partitioning means an in-flight LLM analysis no longer delays SLM triage —
+  triage continues at its normal pace on its own dedicated core
 - **Temperature tuning**: Lower temp = faster, deterministic | Higher temp = more nuanced
 - **Quantization**: Mistral Q4 is optimized for Raspberry Pi memory constraints
 
@@ -212,13 +323,14 @@ Adjust `PARAMETER num_predict` in the Modelfile:
 
 - Ollama Documentation: https://github.com/ollama/ollama
 - Model Details: https://ollama.ai/library
+- systemd `AllowedCPUs`: `man systemd.resource-control`
 - AEGIS Pipeline: See `src/aegis/middleware/pipeline.py`
 - Environment Variables: See `.env.example`
 
 ---
 
 **Next Steps:**
-1. Run Step 1-5 on Raspberry Pi
-2. Verify connectivity from main AEGIS node
+1. Run Steps 1-7 on Raspberry Pi
+2. Verify connectivity from main AEGIS node (both ports)
 3. Deploy `src/aegis/llm/client.py` on AEGIS node
 4. Run integration tests: `pytest tests/integration/test_ollama_connection.py`

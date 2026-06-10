@@ -39,9 +39,9 @@ Wazuh 4.7 → RabbitMQ 3.12 (queue: aegis.triage)
 WireGuard IP : 10.0.0.1  (accessible via tunnel wg-aegis only)
 SSH          : ssh kika@10.0.0.1
 Firewall     : nftables strict (WireGuard UDP 51820 only outbound)
-Ollama ARM   : OLLAMA_HOST=0.0.0.0:11434 (systemd override required)
-  qwen25-aegis     → SLM triage  (Qwen 2.5 1.5B, timeout 90s)
-  mistral-aegis    → LLM analysis (Mistral 7B Q4, timeout 240s)
+Ollama ARM   : two partitioned instances (systemd, see docs/raspberrypi-ollama-setup.md)
+  ollama-slm  0.0.0.0:11434, 1 core  → qwen25-aegis  (SLM triage,  timeout 90s)
+  ollama-llm  0.0.0.0:11435, 3 cores → mistral-aegis (LLM analysis, timeout 240s)
 ```
 
 ### Developer environment

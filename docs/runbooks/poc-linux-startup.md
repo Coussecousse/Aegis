@@ -252,17 +252,20 @@ for i, m in zip(d['ids'], d['metadatas']):
 
 ## Step 7 — Verify Raspberry Pi connectivity (Partie C prerequisite)
 
-The Pi must be reachable on WireGuard IP `10.0.0.1` with Ollama listening on `0.0.0.0:11434`.
+The Pi runs two partitioned Ollama instances, reachable on WireGuard IP `10.0.0.1`:
+SLM on `0.0.0.0:11434` (1 core) and LLM on `0.0.0.0:11435` (3 cores) — see
+`docs/raspberrypi-ollama-setup.md` for the full architecture.
 
 ```bash
 # curl is not installed in the middleware image — use Python instead
 docker exec aegis-node1-middleware-1 python3 -c "
 import urllib.request, json
-r = urllib.request.urlopen('http://10.0.0.1:11434/api/tags', timeout=5)
-for m in json.loads(r.read()).get('models', []):
-    print(m['name'])
+for port, expected in [(11434, 'qwen25-aegis'), (11435, 'mistral-aegis')]:
+    r = urllib.request.urlopen(f'http://10.0.0.1:{port}/api/tags', timeout=5)
+    names = [m['name'] for m in json.loads(r.read()).get('models', [])]
+    print(port, names)
 "
-# Expected: qwen25-aegis and mistral-aegis in the list
+# Expected: qwen25-aegis listed for :11434, mistral-aegis listed for :11435
 ```
 
 If the models are not listed, run Partie C steps first (see below).
@@ -339,24 +342,62 @@ ollama list
 # Required: qwen2.5:1.5b, mistral:7b-instruct-q4_K_M
 ```
 
-**Make Ollama listen on all interfaces** (required for Node1 to reach it via WireGuard).
-`systemctl edit` may silently discard an empty file — write the override directly:
+**Replace the single `ollama.service` with two CPU-pinned instances** — SLM on
+:11434 (1 core) and LLM on :11435 (3 cores), required for Node1 to reach both via
+WireGuard. Full rationale and verification steps in
+`docs/raspberrypi-ollama-setup.md`; condensed here for the POC:
 
 ```bash
-sudo mkdir -p /etc/systemd/system/ollama.service.d/
-sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null << 'EOF'
-[Service]
-Environment="OLLAMA_HOST=0.0.0.0:11434"
-EOF
-sudo systemctl daemon-reload
-sudo systemctl restart ollama
+# Stop and disable the default single-instance service (frees port 11434)
+sudo systemctl disable --now ollama
 
-# Verify — must show *:11434 (all interfaces)
-ss -tlnp | grep 11434
+# SLM instance — 1 core, port 11434
+sudo tee /etc/systemd/system/ollama-slm.service > /dev/null << 'EOF'
+[Unit]
+Description=Ollama SLM instance (triage, Qwen 2.5 1.5B)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+AllowedCPUs=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# LLM instance — 3 cores, port 11435
+sudo tee /etc/systemd/system/ollama-llm.service > /dev/null << 'EOF'
+[Unit]
+Description=Ollama LLM instance (analysis, Mistral 7B Q4)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+Environment="OLLAMA_HOST=0.0.0.0:11435"
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+AllowedCPUs=1-3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now ollama-slm ollama-llm
+
+# Verify — must show *:11434 and *:11435 (all interfaces)
+ss -tlnp | grep -E '11434|11435'
 ```
 
 ```bash
-# Create AEGIS-tuned model variants
+# Create AEGIS-tuned model variants (either instance — shared model store)
 ollama create qwen25-aegis  -f ~/Modelfile.slm-qwen25
 ollama create mistral-aegis -f ~/Modelfile.llm-mistral
 
@@ -370,11 +411,11 @@ ollama list
 ```bash
 python3 -c "
 import urllib.request, json
-r = urllib.request.urlopen('http://PI_IP:11434/api/tags', timeout=5)
-for m in json.loads(r.read()).get('models', []):
-    print(m['name'])
+for port, expected in [(11434, 'qwen25-aegis'), (11435, 'mistral-aegis')]:
+    r = urllib.request.urlopen(f'http://PI_IP:{port}/api/tags', timeout=5)
+    print(port, [m['name'] for m in json.loads(r.read()).get('models', [])])
 "
-# Must include: qwen25-aegis, mistral-aegis
+# Must list qwen25-aegis on :11434 and mistral-aegis on :11435
 ```
 
 > **Air-gapped Pi note**: `ollama create <name> -f Modelfile` with a `FROM <model>`
@@ -859,7 +900,8 @@ Both consumers run concurrently via `asyncio.gather()` in
 [`__main__.py`](../../src/aegis/__main__.py), alongside the identity-sync consumer.
 They share a single `MetricsCollector` instance, since Prometheus' global registry
 rejects duplicate metric registrations. There is no Ollama-call serialization at the
-Python level (see "SLM model swap" below for how concurrency is now handled).
+Python level (see "Triage/analysis serialization" below for how concurrency is now
+handled).
 
 New env var: `RABBITMQ_REPORTS_QUEUE` (default `aegis.reports`, mirrors
 `RABBITMQ_QUEUE`/`RABBITMQ_IDENTITY_QUEUE` — see `.env.example`).
@@ -907,6 +949,22 @@ concurrently) after removing the semaphore, but on the Pi's 4 ARM cores both inf
 slowed down/timed out simultaneously — worse than serial. Reverted to
 `OLLAMA_NUM_PARALLEL=1` (Ollama's default internal queue serializes requests; each one
 still runs at full speed once it's its turn).
+
+### Triage/analysis serialization: dedicated SLM/LLM Ollama instances
+
+**Cause**: even with the Python-level semaphore removed, both consumers still pointed
+at the *same* Ollama instance on `:11434`. SLM triage and LLM analysis requests landed
+in that single instance's internal queue (`OLLAMA_NUM_PARALLEL=1`), so a 5-10 min LLM
+analysis still queued behind every triage call (and vice versa) — the `aegis.triage`
+queue backed up and MTTT spiked for every alert pending during an analysis.
+
+**Fix**: the Pi now runs two independent `ollama serve` processes, each pinned to its
+own CPU cores via systemd `AllowedCPUs` — `ollama-slm` (1 core, port 11434,
+`qwen25-aegis`) and `ollama-llm` (3 cores, port 11435, `mistral-aegis`). The triage
+consumer's `OllamaClient` points at `OLLAMA_SLM_BASE_URL`, the analysis consumer's at
+`OLLAMA_LLM_BASE_URL` (see `.env.example`) — there is no shared instance and no shared
+lock between them. Full systemd unit definitions and verification steps:
+[raspberrypi-ollama-setup.md](../raspberrypi-ollama-setup.md).
 
 ### False positive: "auditd: Device enables promiscuous mode" on the AEGIS host itself
 
