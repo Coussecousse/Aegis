@@ -68,6 +68,20 @@ def test_pipeline_duration_buckets_cover_llm_scale_durations() -> None:
     assert bucket_900s == 1.0
 
 
+def test_record_triage_observes_triage_stage() -> None:
+    registry = CollectorRegistry()
+    metrics = MetricsCollector(registry=registry)
+
+    metrics.record_triage(duration_s=2.5)
+
+    count_value = _sample_value(
+        metrics.pipeline_duration,
+        "aegis_pipeline_duration_seconds_count",
+        {"stage": "triage"},
+    )
+    assert count_value == 1.0
+
+
 def test_danger_score_gauge_reflects_latest() -> None:
     registry = CollectorRegistry()
     metrics = MetricsCollector(registry=registry)
