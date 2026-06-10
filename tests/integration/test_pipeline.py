@@ -120,7 +120,7 @@ async def _run_pipeline(
 async def test_pipeline_low_slm_confidence_discards_and_skips_llm() -> None:
     ollama = _FakeOllamaClient(
         responses={
-            "tinyllama-aegis": {
+            "qwen25-aegis": {
                 "is_suspect": True,
                 "confidence": 0.49,
                 "behavior_category": "normal",
@@ -155,7 +155,7 @@ async def test_pipeline_low_slm_confidence_discards_and_skips_llm() -> None:
     )
 
     assert result is None
-    assert ollama.calls == ["tinyllama-aegis"]
+    assert ollama.calls == ["qwen25-aegis"]
     assert shuffle.reports_sent == 0
 
 
@@ -163,7 +163,7 @@ async def test_pipeline_low_slm_confidence_discards_and_skips_llm() -> None:
 async def test_pipeline_tier0_high_confidence_results_critical() -> None:
     ollama = _FakeOllamaClient(
         responses={
-            "tinyllama-aegis": {
+            "qwen25-aegis": {
                 "is_suspect": True,
                 "confidence": 0.92,
                 "behavior_category": "lateral_movement",
@@ -200,7 +200,7 @@ async def test_pipeline_tier0_high_confidence_results_critical() -> None:
 async def test_pipeline_tier2_medium_confidence_in_expected_range() -> None:
     ollama = _FakeOllamaClient(
         responses={
-            "tinyllama-aegis": {
+            "qwen25-aegis": {
                 "is_suspect": True,
                 "confidence": 0.6,
                 "behavior_category": "privilege_escalation",
@@ -237,7 +237,7 @@ async def test_pipeline_tier2_medium_confidence_in_expected_range() -> None:
 async def test_pipeline_llm_timeout_uses_slm_fallback() -> None:
     ollama = _FakeOllamaClient(
         responses={
-            "tinyllama-aegis": {
+            "qwen25-aegis": {
                 "is_suspect": True,
                 "confidence": 0.78,
                 "behavior_category": "lateral_movement",
@@ -263,7 +263,7 @@ async def test_pipeline_llm_timeout_uses_slm_fallback() -> None:
 async def test_pipeline_soar_error_does_not_crash() -> None:
     ollama = _FakeOllamaClient(
         responses={
-            "tinyllama-aegis": {
+            "qwen25-aegis": {
                 "is_suspect": True,
                 "confidence": 0.8,
                 "behavior_category": "lateral_movement",
