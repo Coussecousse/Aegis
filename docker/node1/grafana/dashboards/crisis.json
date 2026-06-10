@@ -90,19 +90,78 @@
 		{
 			"id": 5,
 			"type": "timeseries",
-			"title": "LLM Inference Duration p95",
+			"title": "SLM Triage Duration p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 8
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"slm\"}[5m])) by (le))",
+					"legendFormat": "p95"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "histogram_quantile(0.50, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"slm\"}[5m])) by (le))",
+					"legendFormat": "p50 (médiane)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
+		},
+		{
+			"id": 6,
+			"type": "timeseries",
+			"title": "LLM Analysis Duration p95 (s)",
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 8
 			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
 			"targets": [
 				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
 					"refId": "A",
-					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"llm\"}[5m])) by (le))"
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"llm\"}[5m])) by (le))",
+					"legendFormat": "p95"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "histogram_quantile(0.50, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"llm\"}[5m])) by (le))",
+					"legendFormat": "p50 (médiane)"
 				}
-			]
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
 		}
 	]
 }
