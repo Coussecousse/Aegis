@@ -67,7 +67,7 @@ async def triage_log(
     Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
 
     Triage steps (strict order):
-    1. SLM: Quick suspicion scoring (TinyLlama)
+    1. SLM: Quick suspicion scoring (Qwen 2.5 1.5B)
     2. Gate: If not suspect or low confidence → discard, return None
     3. RAG: Fetch asset context + UEBA from ChromaDB
     4. Gate: UEBA false-positive filter → discard, return None
