@@ -51,6 +51,16 @@ class MetricsCollector:
         self.alerts_processed.labels(status=status, severity=severity).inc()
         self.pipeline_duration.labels(stage="total").observe(duration_s)
 
+    def record_triage(self, duration_s: float) -> None:
+        """Record triage_log() duration — the MTTT (Mean Time To Triage) signal.
+
+        Observed on every triage_log() exit path (suspicion-gate discard, RAG
+        error, UEBA-gate discard, and escalation), so MTTT reflects all
+        alerts entering the pipeline, not only the subset escalated to
+        analyze_log().
+        """
+        self.pipeline_duration.labels(stage="triage").observe(duration_s)
+
     def record_slm(self, duration_s: float) -> None:
         """Record SLM stage duration."""
         self.pipeline_duration.labels(stage="slm").observe(duration_s)

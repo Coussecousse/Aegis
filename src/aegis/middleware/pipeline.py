@@ -170,6 +170,7 @@ async def triage_log(
     # ========================================================================
     if not slm.is_suspect or slm.confidence < suspicion_threshold:
         if metrics is not None:
+            metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(
                 status="discarded",
                 severity="low",
@@ -229,6 +230,7 @@ async def triage_log(
     except Exception as e:
         if metrics is not None:
             metrics.record_rag(time.perf_counter() - rag_stage_start)
+            metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(
                 status="error",
                 severity="unknown",
@@ -252,6 +254,7 @@ async def triage_log(
     # ========================================================================
     if rag.ueba.anomaly_score < 0.15 and log.rule_level <= 8 and rag.asset_criticality != "tier0":
         if metrics is not None:
+            metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(
                 status="discarded",
                 severity="low",
@@ -269,6 +272,9 @@ async def triage_log(
             )
         )
         return None
+
+    if metrics is not None:
+        metrics.record_triage(time.perf_counter() - total_perf_start)
 
     logger.info(
         json.dumps(
