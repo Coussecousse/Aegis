@@ -24,6 +24,7 @@ Zero cloud calls. Zero automatic remediation (human validation required).
 
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import Literal
@@ -48,6 +49,10 @@ from aegis.rag.client import ChromaDBClient
 from aegis.soar.client import ShuffleClient
 
 logger = logging.getLogger(__name__)
+
+# Model names configurable via env — change SLM/LLM without code rebuild.
+_SLM_MODEL = os.getenv("SLM_MODEL", "qwen25-aegis")
+_LLM_MODEL = os.getenv("LLM_MODEL", "mistral-aegis")
 
 
 async def triage_log(
@@ -116,13 +121,11 @@ async def triage_log(
 
         slm_prompt = build_slm_prompt(log)
         slm_response_dict = await ollama_client.generate(
-            model="tinyllama-aegis",
+            model=_SLM_MODEL,
             prompt=slm_prompt,
             timeout=slm_timeout,
-            keep_alive=-1,  # keep SLM permanently in RAM for low-latency triage
-            # SLM only outputs a small JSON (is_suspect/confidence/category/reason) —
-            # capping generation keeps CPU-only inference within the timeout
-            num_predict=100,
+            keep_alive=-1,  # keep SLM permanently in RAM — Pi 16 GB holds both models
+            num_predict=180,
         )
         slm = SlmResponse(**slm_response_dict)
 
@@ -343,12 +346,10 @@ async def analyze_log(
 
         llm_prompt = build_llm_prompt(log, slm, rag)
         llm_response_dict = await ollama_client.generate(
-            model="mistral-aegis",
+            model=_LLM_MODEL,
             prompt=llm_prompt,
             timeout=llm_timeout,
-            # Unload promptly after escalation reports (rare path) so the SLM —
-            # which triages every alert — keeps the Pi's RAM to itself
-            keep_alive=60,
+            keep_alive=-1,  # Pi 16 GB holds both SLM and LLM — no swap needed
         )
 
         llm = LlmResponse(**llm_response_dict)

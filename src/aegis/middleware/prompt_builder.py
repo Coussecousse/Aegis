@@ -26,12 +26,14 @@ def build_slm_prompt(log: WazuhLog) -> str:
     """
     full_log_truncated = log.full_log[:300]
     return (
-        f"Rule: {log.rule_id} | Level: {log.rule_level}/15\n"
-        f"Description: {log.rule_description}\n"
-        f"Machine: {log.source_agent} | IP: {log.source_ip}\n"
-        f"Decoder: {log.decoder_name or 'unknown'}\n"
-        f"MITRE: {log.mitre_technique or 'N/A'}\n"
-        f"Log: {full_log_truncated}"
+        f"ALERT DATA:\n"
+        f"rule_id={log.rule_id} level={log.rule_level}/15\n"
+        f"description={log.rule_description}\n"
+        f"agent={log.source_agent} ip={log.source_ip}\n"
+        f"decoder={log.decoder_name or 'unknown'} mitre={log.mitre_technique or 'N/A'}\n"
+        f"raw_log={full_log_truncated}\n\n"
+        f"OUTPUT: JSON triage with fields is_suspect, confidence, behavior_category,"
+        f" reasoning_short, raw_probabilities."
     )
 
 
