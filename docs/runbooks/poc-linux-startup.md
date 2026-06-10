@@ -932,6 +932,34 @@ Modelfile: [Modelfile.slm-qwen25](../modelfiles/Modelfile.slm-qwen25).
   and Mistral 7B Q4 (~4.5 GB) fit simultaneously with no swap, so there's no need to
   unload the LLM between reports.
 
+### MTTT metric (`stage="triage"`) and RabbitMQ queue-depth panels
+
+**What changed**: `triage_log()` now calls `MetricsCollector.record_triage()` on every
+exit path (suspicion-gate discard, RAG error, UEBA-gate discard, escalation), exposed as
+`aegis_pipeline_duration_seconds_bucket{stage="triage"}` — the MTTT (Mean Time To Triage)
+signal used by [ADR 002](../adr/002-mttt-measurement-protocol.md). The Crisis dashboard
+gained two panels: "MTTT — Triage Duration p50/p95" and "Queue Depth — aegis.triage /
+aegis.reports".
+
+**Operational step required**: the queue-depth panel needs
+`prometheus.return_per_object_metrics = true`
+([rabbitmq.conf](../../docker/node1/rabbitmq/config/rabbitmq.conf)), which RabbitMQ only
+reads at startup. Restart the container after pulling this change:
+
+```bash
+docker compose -f docker/node1/docker-compose.yml --env-file .env restart rabbitmq
+```
+
+Verify with:
+
+```bash
+curl -s http://localhost:9090/api/v1/query \
+  --data-urlencode 'query=rabbitmq_queue_messages{queue="aegis.triage"}'
+```
+
+The middleware/collector images still need the usual rebuild for the `record_triage()`
+code change (Step 1).
+
 **Qwen echo bug**: with the old prompt format (`Rule: ... | Level: ...`), Qwen 2.5
 echoed the input alert back as JSON (`{"rule_id": ..., "rule_level": ...}`) instead of
 producing the triage schema — `format: "json"` in Ollama's `/api/generate` only enforces
