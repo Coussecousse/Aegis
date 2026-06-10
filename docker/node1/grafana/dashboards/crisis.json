@@ -162,6 +162,82 @@
 				"tooltip": { "mode": "multi", "sort": "none" },
 				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
 			}
+		},
+		{
+			"id": 7,
+			"type": "timeseries",
+			"title": "MTTT — Triage Duration p50/p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 16
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"triage\"}[5m])) by (le))",
+					"legendFormat": "p95"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "histogram_quantile(0.50, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"triage\"}[5m])) by (le))",
+					"legendFormat": "p50 (médiane)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
+		},
+		{
+			"id": 8,
+			"type": "timeseries",
+			"title": "Queue Depth — aegis.triage / aegis.reports",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 16
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "rabbitmq_queue_messages{queue=\"aegis.triage\", vhost=\"aegis\"}",
+					"legendFormat": "aegis.triage"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "rabbitmq_queue_messages{queue=\"aegis.reports\", vhost=\"aegis\"}",
+					"legendFormat": "aegis.reports"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
 		}
 	]
 }
