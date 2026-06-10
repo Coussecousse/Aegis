@@ -151,13 +151,9 @@ async def main() -> None:
             "ensure the stack is started with --profile full or override SHUFFLE_WEBHOOK_URL"
         )
 
-    # Serialize Ollama inference across the triage and analysis consumers —
-    # the Pi is CPU-only and running both models at once would contend for the
-    # same CPU/RAM. Sharing one semaphore guarantees only one model generates
-    # at a time, while letting the rest of each consumer's loop run unblocked.
-    ollama_semaphore = asyncio.Semaphore(1)
-
     # Initialize triage consumer (fast loop: SLM + RAG + gates)
+    # No semaphore — Ollama serializes inference requests internally via its own
+    # queue (OLLAMA_NUM_PARALLEL=1 on the Pi), so a Python-level lock is redundant.
     consumer = RabbitMQConsumer(
         rabbitmq_host=rabbitmq_host,
         rabbitmq_port=rabbitmq_port,
@@ -170,17 +166,14 @@ async def main() -> None:
         metrics=metrics_collector,
         suspicion_threshold=suspicion_threshold,
         slm_timeout=slm_timeout,
-        semaphore=ollama_semaphore,
     )
 
     identity_consumer = build_identity_consumer_from_env()
 
-    # Analysis consumer (slow loop: LLM + risk + report + SOAR) shares the
-    # same MetricsCollector (Prometheus rejects duplicate registrations) and
-    # the same Ollama semaphore as the triage consumer.
+    # Analysis consumer (slow loop: LLM + risk + report + SOAR).
+    # Shares the same MetricsCollector — Prometheus rejects duplicate registrations.
     analysis_consumer = build_analysis_consumer_from_env(
         metrics=metrics_collector,
-        semaphore=ollama_semaphore,
     )
 
     # Start all three consumers concurrently — triage, analysis, identity sync
