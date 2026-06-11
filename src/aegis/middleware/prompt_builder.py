@@ -66,6 +66,11 @@ def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
     else:
         ueba_signal = f"ANOMALOUS ({score:.2f}) — strong indicator of real threat"
 
+    # The prompt must NOT end on the SLM reasoning or the asset block: Mistral 7B Q4
+    # tends to continue/parrot whatever text comes last, which produced degenerate
+    # single-field JSON (just a copied recommended_action example). Ending on an
+    # explicit TASK that re-lists every required key, anchored on the Log line,
+    # counteracts that recency bias.
     return (
         f"--- ALERT ---\n"
         f"Rule: {log.rule_id} | Level: {log.rule_level}/15\n"
@@ -83,7 +88,15 @@ def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
         f"UEBA: {ueba_signal}\n"
         f"Known similar incidents: {incidents_count}\n"
         f"\n"
-        f"--- SLM PRE-ANALYSIS ---\n"
+        f"--- SLM PRE-ANALYSIS (hint only, may be wrong — do not copy) ---\n"
         f"Category: {slm.behavior_category} | Confidence: {slm.confidence:.0%}\n"
-        f"{slm.reasoning_short}"
+        f"{slm.reasoning_short}\n"
+        f"\n"
+        f"--- TASK ---\n"
+        f"Analyse the Log line above. Respond with ONE JSON object containing ALL of "
+        f"these keys, every value derived from THIS alert (never from the examples in "
+        f"your instructions):\n"
+        f"attack_confirmed, confidence, attack_type, severity, affected_asset, "
+        f"asset_criticality, plain_language_summary, recommended_action, "
+        f"requires_human_validation, raw_probabilities."
     )
