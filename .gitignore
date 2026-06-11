@@ -43,3 +43,6 @@ coverage.xml
 .DS_Store
 Thumbs.db
 *.deb
+
+# Personal notes (mémoire / journal de session) — not part of the project docs
+notes/
