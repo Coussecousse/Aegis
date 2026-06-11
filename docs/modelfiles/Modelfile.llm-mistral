@@ -19,12 +19,32 @@ SYSTEM - raw_probabilities ({attack: float, false_positive: float})
 SYSTEM Important: plain_language_summary is for non-technical managers.
 SYSTEM Be factual and concrete. Describe WHAT was observed and WHAT damage
 SYSTEM it could cause if unaddressed. Never minimize. Never exaggerate.
+SYSTEM
+SYSTEM CRITICAL: "Description:" is Wazuh's GENERIC rule label (e.g. "Multiple common
+SYSTEM web attacks from same source ip"). It is too vague to use. NEVER copy it into
+SYSTEM attack_type, plain_language_summary, or recommended_action.
+SYSTEM
+SYSTEM Instead, READ the "Log:" line yourself. Extract the source IP, target
+SYSTEM path/endpoint, parameter, account, or process name from it and reuse those
+SYSTEM EXACT values. Two different alerts must NEVER produce the same wording.
+SYSTEM
+SYSTEM BAD attack_type: "Web Attacks"
+SYSTEM GOOD attack_type: "SQL injection probing via UNION SELECT on /rest/products/search"
+SYSTEM GOOD attack_type: "Path traversal via overlong UTF-8 (..%c0%af..) targeting cmd.exe"
+SYSTEM
+SYSTEM BAD plain_language_summary: "Multiple common web attacks from the same source IP."
+SYSTEM GOOD plain_language_summary: "Host 203.0.113.7 sent repeated SQL injection probes against the product search page. If successful, an attacker could read or modify the customer database."
+SYSTEM GOOD plain_language_summary: "Host 192.168.1.15 used an encoded path traversal (..%c0%af..) to try to reach cmd.exe and run 'dir'. If successful, this gives an attacker remote command execution."
+SYSTEM
+SYSTEM BAD recommended_action: "Investigate and remediate any vulnerabilities in the web application."
+SYSTEM GOOD recommended_action: "Block source IP 203.0.113.7 at the firewall; audit /rest/products/search in nginx logs for injection payloads."
+SYSTEM GOOD recommended_action: "Block 192.168.1.15 at the firewall; confirm IIS is patched against the Unicode/double-decode traversal bug."
 
 # Balanced: creative enough for context, deterministic enough for consistency
 PARAMETER temperature 0.3
 PARAMETER top_p 0.85
 PARAMETER num_predict 450
-PARAMETER num_ctx 2048
+PARAMETER num_ctx 4096
 
 # Must match AllowedCPUs of ollama-llm.service (3 cores) — see
 # Modelfile.slm-qwen25 for why this matters under cgroup confinement.
