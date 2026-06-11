@@ -135,6 +135,7 @@ async def test_get_asset_context_found_tier0(monkeypatch: pytest.MonkeyPatch) ->
         context = await client.get_asset_context("dc-01")
 
     assert context.asset_criticality == "tier0"
+    assert context.ueba.has_baseline is True
 
 
 @pytest.mark.asyncio
@@ -183,6 +184,7 @@ async def test_get_asset_context_not_found_fallback_tier2(
         context = await client.get_asset_context("missing-asset")
 
     assert context.asset_criticality == "tier2"
+    assert context.ueba.has_baseline is False
     assert "not found in ChromaDB" in caplog.text
 
 

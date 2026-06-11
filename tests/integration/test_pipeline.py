@@ -72,13 +72,14 @@ def _make_log(rule_level: int = 8) -> WazuhLog:
     )
 
 
-def _make_rag(tier: str, anomaly_score: float = 0.0) -> RagContext:
+def _make_rag(tier: str, anomaly_score: float = 0.0, has_baseline: bool = True) -> RagContext:
     return RagContext(
         asset_name="asset-01",
         asset_criticality=tier,
         asset_description="Production system",
         similar_incidents=[],
         ueba=UEBAMetrics(
+            has_baseline=has_baseline,
             baseline_description="Normal business-hours activity",
             associated_users=["operator"],
             normal_activity_window="08:00-18:00",
@@ -153,6 +154,63 @@ async def test_pipeline_low_slm_confidence_discards_and_skips_llm() -> None:
         slm_timeout=10.0,
         llm_timeout=45.0,
     )
+
+    assert result is None
+    assert ollama.calls == ["qwen25-aegis"]
+    assert shuffle.reports_sent == 0
+
+
+def _suspect_ollama() -> _FakeOllamaClient:
+    """SLM flags a suspect alert; LLM confirms — used to probe the UEBA gate."""
+    return _FakeOllamaClient(
+        responses={
+            "qwen25-aegis": {
+                "is_suspect": True,
+                "confidence": 0.85,
+                "behavior_category": "normal",
+                "reasoning_short": "SQL injection probe against product search",
+                "raw_probabilities": {"suspect": 0.85, "benign": 0.15},
+            },
+            "mistral-aegis": {
+                "attack_confirmed": True,
+                "confidence": 0.9,
+                "attack_type": "SQL injection",
+                "severity": "high",
+                "affected_asset": "asset-01",
+                "asset_criticality": "tier2",
+                "plain_language_summary": "Repeated SQLi probes from one host.",
+                "recommended_action": "Block the source IP at the firewall.",
+                "requires_human_validation": True,
+                "raw_probabilities": {"attack": 0.9, "false_positive": 0.1},
+            },
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_no_baseline_suspect_escalates_to_llm() -> None:
+    # Unprofiled asset (has_baseline=False): a low-severity but SLM-suspect alert
+    # must NOT be discarded — anomaly_score=0.0 means "unknown", not "normal".
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=False))
+    shuffle = _FakeShuffleClient()
+
+    result = await _run_pipeline(_make_log(rule_level=7), ollama, chroma, shuffle)
+
+    assert result is not None
+    assert ollama.calls == ["qwen25-aegis", "mistral-aegis"]
+    assert shuffle.reports_sent == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_baseline_normal_discards_before_llm() -> None:
+    # A real baseline that says "normal" (low anomaly) still gates out a
+    # low-severity alert on a non-critical asset — the LLM is never called.
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=True))
+    shuffle = _FakeShuffleClient()
+
+    result = await _run_pipeline(_make_log(rule_level=7), ollama, chroma, shuffle)
 
     assert result is None
     assert ollama.calls == ["qwen25-aegis"]
