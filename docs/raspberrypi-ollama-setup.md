@@ -8,6 +8,22 @@
 
 ---
 
+## Deployment Status
+
+✅ **Deployed and verified on the Raspberry Pi — 2026-06-10**
+
+- Steps 1-2: `ollama.service` disabled, `ollama-slm` and `ollama-llm` systemd units
+  created and enabled — both `active (running)`
+- Step 3: both instances respond `200 OK` on `/api/tags` over WireGuard
+  (`curl http://10.0.0.1:11434/api/tags` and `curl http://10.0.0.1:11435/api/tags`)
+- Steps 4-5: shared model store confirmed on both ports —
+  `qwen2.5:1.5b`, `qwen25-aegis`, `mistral-aegis` all present, no re-pull needed
+- Step 6 (LLM round-trip): `mistral-aegis` inference on `ollama-llm` exceeds 60s —
+  use a generous client timeout (`-m 600` or more) when testing manually, see
+  Performance Notes (~5-10 min per analysis)
+
+---
+
 ## Architecture: Two Partitioned Ollama Instances
 
 A single shared Ollama instance means a 5-10 minute LLM analysis and SLM triage compete
@@ -40,17 +56,11 @@ points each consumer at its own instance via `OLLAMA_SLM_BASE_URL` /
 
 ---
 
-## Step 1: Disable the Default Single-Instance Service
+## Step 1: Inspect the Existing Service
 
-The official installer's `ollama.service` listens on `127.0.0.1:11434` by default.
-Stop and disable it — `ollama-slm` (below) takes over port 11434:
-
-```bash
-sudo systemctl disable --now ollama
-```
-
-Note the `ExecStart`, `User` and `Group` from the existing unit — the two new units
-reuse them:
+The official installer's `ollama.service` listens on `127.0.0.1:11434` by default
+and will be replaced by the two units below. Note its `ExecStart`, `User` and
+`Group` — the new units reuse them:
 
 ```bash
 systemctl cat ollama
@@ -63,9 +73,11 @@ systemctl cat ollama
 
 ## Step 2: Create the SLM and LLM systemd Units
 
-### `/etc/systemd/system/ollama-slm.service`
+Run these commands as-is on the Raspberry Pi — they create both unit files via
+heredoc, no manual editing required:
 
-```ini
+```bash
+sudo tee /etc/systemd/system/ollama-slm.service > /dev/null <<'EOF'
 [Unit]
 Description=Ollama SLM instance (triage, Qwen 2.5 1.5B)
 After=network-online.target
@@ -81,11 +93,9 @@ AllowedCPUs=0
 
 [Install]
 WantedBy=multi-user.target
-```
+EOF
 
-### `/etc/systemd/system/ollama-llm.service`
-
-```ini
+sudo tee /etc/systemd/system/ollama-llm.service > /dev/null <<'EOF'
 [Unit]
 Description=Ollama LLM instance (analysis, Mistral 7B Q4)
 After=network-online.target
@@ -101,6 +111,7 @@ AllowedCPUs=1-3
 
 [Install]
 WantedBy=multi-user.target
+EOF
 ```
 
 `AllowedCPUs` is a cgroup v2 `cpuset` directive (systemd ≥ 244, the default on
@@ -113,10 +124,11 @@ Both units omit `OLLAMA_MODELS`, so they default to the same model store
 serve` only reads model files during inference, so two instances can share the
 store safely.
 
-Enable and start both:
+Reload systemd, switch off the default service, and start both new instances:
 
 ```bash
 sudo systemctl daemon-reload
+sudo systemctl disable --now ollama
 sudo systemctl enable --now ollama-slm ollama-llm
 ```
 
@@ -129,6 +141,9 @@ no direct Internet access.
 ## Step 3: Verify Network Binding and CPU Pinning
 
 ```bash
+# Both units active (running)
+systemctl status ollama-slm ollama-llm --no-pager
+
 # Both instances listening on all interfaces
 ss -tlnp | grep -E '11434|11435'
 

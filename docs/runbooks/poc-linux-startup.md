@@ -842,7 +842,7 @@ a full triage response easily exceeds a 10–30 s timeout.
 
 ```
 SLM_TIMEOUT=90
-LLM_TIMEOUT=240
+LLM_TIMEOUT=600
 ```
 
 Even 90 s for triage is still far faster than a manual analyst review (the actual MTTT
@@ -997,6 +997,24 @@ consumer's `OllamaClient` points at `OLLAMA_SLM_BASE_URL`, the analysis consumer
 `OLLAMA_LLM_BASE_URL` (see `.env.example`) — there is no shared instance and no shared
 lock between them. Full systemd unit definitions and verification steps:
 [raspberrypi-ollama-setup.md](../raspberrypi-ollama-setup.md).
+
+### CPU oversubscription within each Ollama instance (`num_thread` mismatch)
+
+**Cause**: `AllowedCPUs` confines each `ollama serve` process to a cgroup cpuset, but
+`llama.cpp` does not read the cpuset — it defaults its thread pool to the *host's* total
+core count (4 on the Pi 5). With `ollama-slm` confined to 1 core (`AllowedCPUs=0`) but
+spawning 4 worker threads, the threads thrash on barrier spinlocks waiting for siblings
+the scheduler never runs concurrently — turning a sub-second SLM call into 10+ minutes
+(observed: `SLM_TIMEOUT=90` exceeded 3 times in a row). The same mismatch applies to
+`ollama-llm` (3 cores, `AllowedCPUs=1-3`, but 4 threads by default).
+
+**Fix**: set `PARAMETER num_thread <N>` in each Modelfile to match its instance's
+`AllowedCPUs` core count — `num_thread 1` in
+[Modelfile.slm-qwen25](../modelfiles/Modelfile.slm-qwen25) and `num_thread 3` in
+[Modelfile.llm-mistral](../modelfiles/Modelfile.llm-mistral). `num_thread` is baked into
+the model at build time, not read per-request — rebuild
+(`ollama create <name> -f Modelfile...`) and restart the corresponding systemd unit after
+any Modelfile change.
 
 ### False positive: "auditd: Device enables promiscuous mode" on the AEGIS host itself
 
