@@ -1016,6 +1016,18 @@ the model at build time, not read per-request — rebuild
 (`ollama create <name> -f Modelfile...`) and restart the corresponding systemd unit after
 any Modelfile change.
 
+### `ollama create` fails with `command must be one of "from", "license", ...`
+
+**Cause**: a `SYSTEM` instruction's value contains a `"` that opens a quoted phrase but
+doesn't close it on the same line — Ollama's Modelfile parser cannot follow a quoted
+string across separate `SYSTEM` lines and misreads the next line as an unknown
+instruction. Bare `SYSTEM` lines (no value, used purely for visual spacing) are also
+unreliable.
+
+**Fix**: keep every quoted `"..."` phrase on a single `SYSTEM` line, even if that line
+gets long, and drop empty `SYSTEM` spacer lines entirely. Validate with
+`ollama create <name> -f Modelfile...` before relying on the build.
+
 ### False positive: "auditd: Device enables promiscuous mode" on the AEGIS host itself
 
 **Cause**: the Wazuh agent on `node1-host` (the host running the AEGIS stack) reports
