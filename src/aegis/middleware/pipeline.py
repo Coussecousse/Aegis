@@ -365,6 +365,11 @@ async def analyze_log(
             prompt=llm_prompt,
             timeout=llm_timeout,
             keep_alive=-1,  # Pi 16 GB holds both SLM and LLM — no swap needed
+            # The full report JSON (10 fields, multi-sentence summary) needs headroom
+            # to close. At 450 the model truncated mid-string under format=json, yielding
+            # invalid JSON that was discarded into the SLM fallback. Set here (not only in
+            # the Modelfile) so the cap holds regardless of the deployed model build.
+            num_predict=768,
         )
 
         llm = LlmResponse(**llm_response_dict)
