@@ -124,7 +124,11 @@ class LlmResponse(BaseModel):
     )
     severity: Literal["critical", "high", "medium", "low"] = Field(
         ...,
-        description="Estimated severity",
+        description=(
+            "LLM's own severity estimate — raw, uncalibrated model opinion. "
+            "NOT the authoritative severity; see Decision.severity, which is "
+            "derived deterministically from RiskScore.danger_score."
+        ),
     )
     affected_asset: str = Field(..., description="Affected asset (name or IP)")
     asset_criticality: Literal["tier0", "tier1", "tier2"] = Field(
@@ -323,7 +327,12 @@ class Decision(BaseModel):
 
     severity: Literal["critical", "high", "medium", "low"] = Field(
         ...,
-        description="Final severity",
+        description=(
+            "Authoritative severity for triage routing and human review, derived "
+            "deterministically from RiskScore.danger_score via fixed thresholds. "
+            "Distinct from LlmResponse.severity (the model's raw, uncalibrated "
+            "opinion)."
+        ),
     )
     requires_human_validation: bool = Field(
         ..., description="Does the decision require human validation?"
@@ -347,7 +356,13 @@ class Decision(BaseModel):
 
 
 class AegisReport(BaseModel):
-    """Complete final report sent to Shuffle SOAR."""
+    """Complete final report sent to Shuffle SOAR.
+
+    `llm_analysis.severity` (when present) is the model's raw, uncalibrated
+    opinion and may disagree with `decision.severity` — the binding value
+    derived from `risk_score.danger_score`, which is authoritative for triage
+    and human review.
+    """
 
     alert_id: UUID = Field(..., description="Unique alert report UUID")
     timestamp: datetime = Field(..., description="Report timestamp (ISO 8601)")
