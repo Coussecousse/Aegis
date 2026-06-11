@@ -249,10 +249,19 @@ async def triage_log(
 
     # ========================================================================
     # STEP 3b: UEBA false-positive gate
-    # Discard if behaviour is normal (low anomaly), rule is low severity,
-    # and asset is not critical infrastructure. Avoids wasting LLM on obvious FPs.
+    # Discard only when a real behavioural baseline confirms this is normal
+    # (low anomaly), the rule is low severity, and the asset is not critical
+    # infrastructure. Without a baseline (has_baseline=False), anomaly_score=0.0
+    # means "unknown", not "normal" — failing open here keeps a suspect alert on
+    # an unprofiled asset (the common case before the asset registry is seeded)
+    # from being silently dropped before it ever reaches the LLM.
     # ========================================================================
-    if rag.ueba.anomaly_score < 0.15 and log.rule_level <= 8 and rag.asset_criticality != "tier0":
+    if (
+        rag.ueba.has_baseline
+        and rag.ueba.anomaly_score < 0.15
+        and log.rule_level <= 8
+        and rag.asset_criticality != "tier0"
+    ):
         if metrics is not None:
             metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(

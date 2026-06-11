@@ -160,6 +160,7 @@ class ChromaDBClient:
         anomaly_score_raw = metadata.get("anomaly_score", 0.0)
         baseline_description = str(metadata.get("baseline_description", "No baseline"))
         normal_activity_window = str(metadata.get("normal_activity_window", "Unknown"))
+        has_baseline = True
 
         if (
             "baseline_description" not in metadata
@@ -174,8 +175,10 @@ class ChromaDBClient:
             normal_activity_window = "Unknown"
             recent_anomalies = []
             anomaly_score_raw = 0.0
+            has_baseline = False
 
         return UEBAMetrics(
+            has_baseline=has_baseline,
             baseline_description=baseline_description,
             associated_users=associated_users,
             normal_activity_window=normal_activity_window,
@@ -207,6 +210,7 @@ class ChromaDBClient:
             asset_description="Unknown asset - no metadata found in ChromaDB",
             similar_incidents=[],
             ueba=UEBAMetrics(
+                has_baseline=False,
                 baseline_description="No baseline",
                 associated_users=[],
                 normal_activity_window="Unknown",

@@ -166,6 +166,15 @@ class LlmResponse(BaseModel):
 class UEBAMetrics(BaseModel):
     """User and Entity Behavior Analytics: behavioral baselines and anomalies."""
 
+    has_baseline: bool = Field(
+        default=True,
+        description=(
+            "Whether a real behavioral baseline exists for this asset. False when "
+            "the asset is unknown to ChromaDB or has no UEBA profile yet — in which "
+            "case anomaly_score (0.0) means 'unknown', not 'confirmed normal', so the "
+            "false-positive gate must not use it to discard a suspect alert."
+        ),
+    )
     baseline_description: str = Field(
         ..., description="Description of the expected normal behavior of this asset"
     )
