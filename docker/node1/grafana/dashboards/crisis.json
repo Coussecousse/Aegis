@@ -77,7 +77,7 @@
 			"targets": [
 				{
 					"refId": "A",
-					"expr": "sum(rate(aegis_soar_deliveries_total{status=\"success\"}[5m])) / clamp_min(sum(rate(aegis_soar_deliveries_total[5m])), 0.0001)"
+					"expr": "sum(increase(aegis_soar_deliveries_total{status=\"success\"}[30m])) / clamp_min(sum(increase(aegis_soar_deliveries_total[30m])), 0.0001)"
 				}
 			],
 			"fieldConfig": {
