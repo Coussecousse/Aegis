@@ -36,7 +36,7 @@ SYSTEM GOOD recommended_action: "Block 192.168.1.15 at the firewall; confirm IIS
 # Balanced: creative enough for context, deterministic enough for consistency
 PARAMETER temperature 0.3
 PARAMETER top_p 0.85
-PARAMETER num_predict 450
+PARAMETER num_predict 768
 PARAMETER num_ctx 4096
 
 # Must match AllowedCPUs of ollama-llm.service (3 cores) — see
