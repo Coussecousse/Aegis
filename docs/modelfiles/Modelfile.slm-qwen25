@@ -13,3 +13,8 @@ PARAMETER temperature 0.35
 PARAMETER top_p 0.9
 PARAMETER num_predict 180
 PARAMETER num_ctx 4096
+
+# Must match AllowedCPUs of ollama-slm.service (1 core). Without this, llama.cpp
+# defaults to the host's core count (4) and thrashes on barrier spinlocks when
+# cgroup-confined to 1 core — turning a <1s call into 10+ minutes.
+PARAMETER num_thread 1
