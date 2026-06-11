@@ -476,10 +476,12 @@ async def analyze_log(
     auto_remediation = False
 
     if llm is None:
-        # LLM timeout → force human validation
+        # LLM unavailable (timeout OR unparseable/incomplete response) → human validation.
+        # Keep the wording cause-agnostic: this path also fires on malformed JSON, so
+        # "timed out" would be misleading in the report.
         recommended_action = (
-            "LLM analysis timed out. Manual review required. "
-            "Recommend isolating the source workstation and investigating."
+            "LLM analysis unavailable (timeout or invalid response). Manual review "
+            "required. Recommend isolating the source workstation and investigating."
         )
         requires_human = True
         auto_remediation = False
