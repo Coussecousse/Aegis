@@ -24,10 +24,12 @@ class _FakeOllamaClient:
         timeout: float,
         keep_alive: int = 300,
         num_predict: int | None = None,
+        format_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         _ = prompt
         _ = timeout
         _ = num_predict
+        _ = format_schema
         self.calls.append(model)
         response = self._responses[model]
         if isinstance(response, Exception):

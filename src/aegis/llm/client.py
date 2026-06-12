@@ -65,6 +65,7 @@ class OllamaClient:
         timeout: float = 45.0,
         keep_alive: int = 300,
         num_predict: int | None = None,
+        format_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Generate response from Ollama model with exponential retry.
@@ -82,6 +83,10 @@ class OllamaClient:
                          Raspberry Pi), capping this keeps small-JSON responses (SLM
                          triage) within the timeout instead of running unbounded.
                          None lets Ollama use its own default.
+            format_schema: Optional JSON Schema for Ollama structured outputs. When
+                           provided, decoding is constrained to this exact shape (all
+                           required keys, correct types) instead of free-form JSON —
+                           requires Ollama >= 0.5. None falls back to ``format="json"``.
 
         Returns:
             dict: Parsed JSON response from model.
@@ -90,7 +95,9 @@ class OllamaClient:
             ValueError: If response is not valid JSON after all retries.
             httpx.HTTPError: If all HTTP requests fail (after 3 retries).
         """
-        return await self._generate_with_retry(model, prompt, timeout, keep_alive, num_predict)
+        return await self._generate_with_retry(
+            model, prompt, timeout, keep_alive, num_predict, format_schema
+        )
 
     async def _generate_with_retry(
         self,
@@ -99,6 +106,7 @@ class OllamaClient:
         timeout: float,
         keep_alive: int,
         num_predict: int | None,
+        format_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Send the request to Ollama, retrying with exponential backoff on failure."""
         url = f"{self.base_url}/api/generate"
@@ -106,7 +114,9 @@ class OllamaClient:
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "format": "json",  # constrained decoding — forces valid JSON at the sampler level
+            # constrained decoding — a JSON Schema forces the exact shape (all keys,
+            # right types); "json" only forces syntactically-valid free-form JSON.
+            "format": format_schema if format_schema is not None else "json",
             "keep_alive": keep_alive,
         }
         if num_predict is not None:

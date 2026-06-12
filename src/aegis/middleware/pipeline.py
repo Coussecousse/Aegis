@@ -54,6 +54,12 @@ logger = logging.getLogger(__name__)
 _SLM_MODEL = os.getenv("SLM_MODEL", "qwen25-aegis")
 _LLM_MODEL = os.getenv("LLM_MODEL", "mistral-aegis")
 
+# Opt-in Ollama structured outputs for the LLM: constrains decoding to the
+# LlmResponse JSON Schema so the model cannot emit a partial/degenerate object.
+# Requires Ollama >= 0.5 on the inference node; left off by default so an older
+# Ollama is not broken by an unsupported `format` payload.
+_LLM_USE_SCHEMA = os.getenv("LLM_USE_SCHEMA", "false").strip().lower() == "true"
+
 
 async def triage_log(
     log: WazuhLog,
@@ -370,6 +376,7 @@ async def analyze_log(
             # invalid JSON that was discarded into the SLM fallback. Set here (not only in
             # the Modelfile) so the cap holds regardless of the deployed model build.
             num_predict=768,
+            format_schema=LlmResponse.model_json_schema() if _LLM_USE_SCHEMA else None,
         )
 
         llm = LlmResponse(**llm_response_dict)

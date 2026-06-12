@@ -59,6 +59,43 @@ async def test_generate_valid_json_returns_dict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_format_defaults_to_json_string() -> None:
+    client = OllamaClient("http://localhost:11434")
+    captured: dict[str, Any] = {}
+
+    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = args
+        captured.update(kwargs.get("json", {}))
+        return _FakeResponse(200, {"response": json.dumps({"confidence": 0.5})})
+
+    client._client = httpx.AsyncClient()
+    client._client.post = _post  # type: ignore[method-assign]
+
+    await client.generate("mistral-aegis", "prompt", timeout=10.0)
+
+    assert captured["format"] == "json"
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_format_schema_when_provided() -> None:
+    client = OllamaClient("http://localhost:11434")
+    captured: dict[str, Any] = {}
+    schema = {"type": "object", "required": ["attack_confirmed"]}
+
+    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = args
+        captured.update(kwargs.get("json", {}))
+        return _FakeResponse(200, {"response": json.dumps({"confidence": 0.5})})
+
+    client._client = httpx.AsyncClient()
+    client._client.post = _post  # type: ignore[method-assign]
+
+    await client.generate("mistral-aegis", "prompt", timeout=10.0, format_schema=schema)
+
+    assert captured["format"] == schema
+
+
+@pytest.mark.asyncio
 async def test_generate_timeout_retries_then_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     client = OllamaClient("http://localhost:11434")
     attempts = 0
