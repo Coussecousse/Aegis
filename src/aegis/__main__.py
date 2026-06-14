@@ -24,13 +24,14 @@ import asyncio
 import logging
 import os
 import tempfile
+import urllib.parse
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
 from prometheus_client import start_http_server
 
-from aegis.middleware.consumer import RabbitMQConsumer
+from aegis.middleware.consumer import build_triage_consumer_from_env
 from aegis.middleware.consumer_analysis import build_analysis_consumer_from_env
 from aegis.middleware.consumer_identity import build_identity_consumer_from_env
 from aegis.monitoring.metrics import MetricsCollector
@@ -117,71 +118,25 @@ async def main() -> None:
     metrics_collector = MetricsCollector()
     logging.info("Prometheus metrics endpoint started on port 8080")
 
-    # Load configuration from environment
-    rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
-    rabbitmq_port = int(os.getenv("RABBITMQ_PORT", "5672"))
-    rabbitmq_user = os.getenv("RABBITMQ_USER", "guest")
-    rabbitmq_password = os.getenv("RABBITMQ_PASSWORD", "guest")
-    rabbitmq_queue = os.getenv("RABBITMQ_QUEUE", "aegis.wazuh.alerts")
-
-    ollama_slm_base_url = os.getenv("OLLAMA_SLM_BASE_URL", "http://10.0.0.1:11434")
-    ollama_llm_base_url = os.getenv("OLLAMA_LLM_BASE_URL", "http://10.0.0.1:11435")
-    slm_timeout = float(os.getenv("SLM_TIMEOUT", "10.0"))
-    suspicion_threshold = float(os.getenv("SUSPICION_THRESHOLD", "0.5"))
-
-    chromadb_host = os.getenv("CHROMADB_HOST", "localhost")
-    chromadb_port = int(os.getenv("CHROMADB_PORT", "8000"))
-
-    shuffle_webhook_url = os.getenv("SHUFFLE_WEBHOOK_URL", "http://shuffle:3001/api/v1/hooks/")
-
-    # Log configuration (without secrets)
-    logging.info(
-        f"Configuration loaded: "
-        f"RabbitMQ={rabbitmq_host}:{rabbitmq_port}, "
-        f"Ollama SLM={ollama_slm_base_url}, Ollama LLM={ollama_llm_base_url}, "
-        f"ChromaDB={chromadb_host}:{chromadb_port}, "
-        f"Shuffle=******, "
-        f"suspicion_threshold={suspicion_threshold}"
-    )
-
-    import urllib.parse
-
-    _shuffle_host = urllib.parse.urlparse(shuffle_webhook_url).hostname or ""
+    _shuffle_webhook_url = os.getenv("SHUFFLE_WEBHOOK_URL", "http://shuffle:3001/api/v1/hooks/")
+    _shuffle_host = urllib.parse.urlparse(_shuffle_webhook_url).hostname or ""
     if _shuffle_host == "shuffle":
         logging.warning(
             "SHUFFLE_WEBHOOK_URL points to 'shuffle' hostname — "
             "ensure the stack is started with --profile full or override SHUFFLE_WEBHOOK_URL"
         )
 
-    # Initialize triage consumer (fast loop: SLM + RAG + gates). Talks to the
-    # dedicated SLM Ollama instance (1 CPU core) so a long-running LLM analysis
-    # on the other instance never blocks triage.
-    consumer = RabbitMQConsumer(
-        rabbitmq_host=rabbitmq_host,
-        rabbitmq_port=rabbitmq_port,
-        rabbitmq_user=rabbitmq_user,
-        rabbitmq_password=rabbitmq_password,
-        queue_name=rabbitmq_queue,
-        ollama_base_url=ollama_slm_base_url,
-        chromadb_host=chromadb_host,
-        chromadb_port=chromadb_port,
-        metrics=metrics_collector,
-        suspicion_threshold=suspicion_threshold,
-        slm_timeout=slm_timeout,
-    )
-
+    # Each builder reads its own config from the environment. The triage and
+    # analysis consumers share one MetricsCollector — Prometheus rejects duplicate
+    # registrations on a shared registry.
+    triage_consumer = build_triage_consumer_from_env(metrics=metrics_collector)
+    analysis_consumer = build_analysis_consumer_from_env(metrics=metrics_collector)
     identity_consumer = build_identity_consumer_from_env()
-
-    # Analysis consumer (slow loop: LLM + risk + report + SOAR).
-    # Shares the same MetricsCollector — Prometheus rejects duplicate registrations.
-    analysis_consumer = build_analysis_consumer_from_env(
-        metrics=metrics_collector,
-    )
 
     # Start all three consumers concurrently — triage, analysis, identity sync
     try:
         await asyncio.gather(
-            consumer.start(),
+            triage_consumer.start(),
             analysis_consumer.start(),
             identity_consumer.start(),
         )
