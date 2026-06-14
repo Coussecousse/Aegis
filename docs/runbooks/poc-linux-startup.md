@@ -1067,6 +1067,21 @@ The same rule `80710` triggered by any *other* process (a real sniffing tool, a 
 `ip link set ... promisc on`, etc.) — on `node1-host` or any other agent — still reaches
 the pipeline unaffected.
 
+### Infra-host noise that burns LLM cycles (e.g. netstat rule 533): `WAZUH_EXCLUDED_RULES`
+
+**Cause**: once the UEBA gate fails open for unprofiled assets, low-value host
+self-monitoring rules — notably `533` ("Listened ports status (netstat) changed") on
+`node1-host` — escalate to the LLM. In one live run, 6 of 7 escalations were such noise,
+spending ~86% of the (5-9 min/alert) LLM budget on non-attacks.
+
+**Fix**: drop chosen noise rules *before* triage via the opt-in `WAZUH_EXCLUDED_RULES`
+env var (comma-separated rule ids, read in
+[`__main__.py`](../../src/aegis/collectors/__main__.py), applied in
+`WazuhAlertParser.parse_alert`). Filter by **rule id, not agent name** — same
+single-agent-topology reason as above: excluding `node1-host` would blind real Kali
+detections. Example: `WAZUH_EXCLUDED_RULES=533`. Leave empty to forward everything.
+Unlike the hard-coded `_operational_rules`, this list is operator-tunable per deployment.
+
 ### Shuffle frontend affiche "Waiting for database" après un redémarrage de container
 
 **Cause** : nginx dans `shuffle-frontend` résout le hostname `shuffle-backend` une seule
