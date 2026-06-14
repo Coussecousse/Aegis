@@ -20,12 +20,13 @@ _REQUIRED_LLM_KEYS = (
 )
 
 
-def _make_log() -> WazuhLog:
+def _make_log(attacker_ip: str | None = None) -> WazuhLog:
     return WazuhLog(
         id=uuid4(),
         timestamp=datetime.now(UTC),
         source_agent="node1-host",
-        source_ip="172.18.0.1",
+        source_ip="127.0.0.1",
+        attacker_ip=attacker_ip,
         rule_id=31152,
         rule_level=10,
         rule_description="Multiple SQL injection attempts from same source ip.",
@@ -86,3 +87,15 @@ def test_build_llm_prompt_marks_slm_as_non_authoritative() -> None:
     prompt = build_llm_prompt(_make_log(), _make_slm(), _make_rag())
     assert "do not copy" in prompt.lower()
     assert "Log:" in prompt
+
+
+def test_build_llm_prompt_surfaces_attacker_ip_when_present() -> None:
+    prompt = build_llm_prompt(_make_log(attacker_ip="172.18.0.1"), _make_slm(), _make_rag())
+    assert "Attacker: 172.18.0.1" in prompt
+    assert "Target host: node1-host (127.0.0.1)" in prompt
+
+
+def test_build_llm_prompt_falls_back_to_machine_without_attacker_ip() -> None:
+    prompt = build_llm_prompt(_make_log(attacker_ip=None), _make_slm(), _make_rag())
+    assert "Attacker:" not in prompt
+    assert "Machine: node1-host (127.0.0.1)" in prompt

@@ -37,6 +37,31 @@ def test_parse_alert_valid() -> None:
     assert parsed.decoder_name == "sshd"
 
 
+def test_parse_alert_attacker_ip_from_data_srcip() -> None:
+    payload = _valid_alert()
+    payload["data"] = {"srcip": "172.18.0.1"}
+
+    parsed = WazuhAlertParser.parse_alert(payload, min_level=7)
+
+    assert parsed is not None
+    assert parsed.source_ip == "192.168.1.100"  # asset/host (agent.ip) unchanged
+    assert parsed.attacker_ip == "172.18.0.1"  # real actor surfaced
+
+
+def test_parse_alert_attacker_ip_none_when_absent_or_same() -> None:
+    # No data.srcip → no distinct actor.
+    parsed = WazuhAlertParser.parse_alert(_valid_alert(), min_level=7)
+    assert parsed is not None
+    assert parsed.attacker_ip is None
+
+    # data.srcip equal to the agent IP → not a distinct actor.
+    payload = _valid_alert()
+    payload["data"] = {"srcip": "192.168.1.100"}
+    parsed_same = WazuhAlertParser.parse_alert(payload, min_level=7)
+    assert parsed_same is not None
+    assert parsed_same.attacker_ip is None
+
+
 def test_parse_alert_with_mitre() -> None:
     payload = _valid_alert()
     payload["mitre"] = {"technique": ["T1110", "T1021"]}
