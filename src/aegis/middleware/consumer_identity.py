@@ -9,10 +9,10 @@ requeueing forever — identity enrichment is best-effort, not the alert path.
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import AsyncExitStack
 from typing import Any
 
+from aegis.config import Settings
 from aegis.middleware.message_consumer import (
     MessageConsumer,
     Publisher,
@@ -21,7 +21,6 @@ from aegis.middleware.message_consumer import (
 )
 from aegis.rag.client import ChromaDBClient
 from aegis.rag.ldap import LdapConfig, LdapConnector
-from aegis.vault.loader import load_secrets_to_env
 
 logger = logging.getLogger(__name__)
 
@@ -73,35 +72,28 @@ class IdentityProcessor:
             raise RuntimeError(f"identity sync failed for asset_id={asset_id_raw!r}")
 
 
-def build_identity_consumer_from_env() -> MessageConsumer:
-    """Build the identity MessageConsumer from environment variables."""
-    load_secrets_to_env()
+def build_identity_consumer(settings: Settings) -> MessageConsumer:
+    """Build the identity MessageConsumer from settings."""
+    ldap = settings.ldap
     ldap_config = LdapConfig(
-        host=os.getenv("LDAP_HOST", "localhost"),
-        base_dn=os.getenv("LDAP_BASE_DN", "DC=aerotech,DC=local"),
-        bind_dn=os.getenv("LDAP_BIND_DN", ""),
-        bind_password=os.getenv("LDAP_BIND_PASSWORD", ""),
-        timeout=float(os.getenv("LDAP_TIMEOUT", "5.0")),
-        tier0_group_dn=os.getenv(
-            "LDAP_TIER0_GROUP_DN", "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
-        ),
-        use_ssl=os.getenv("LDAP_USE_SSL", "false").lower() == "true",
-        port=int(os.getenv("LDAP_PORT", "0")),
+        host=ldap.host,
+        base_dn=ldap.base_dn,
+        bind_dn=ldap.bind_dn,
+        bind_password=ldap.bind_password,
+        timeout=ldap.timeout,
+        tier0_group_dn=ldap.tier0_group_dn,
+        use_ssl=ldap.use_ssl,
+        port=ldap.port,
     )
     processor = IdentityProcessor(
-        chromadb_host=os.getenv("CHROMADB_HOST", "localhost"),
-        chromadb_port=int(os.getenv("CHROMADB_PORT", "8000")),
+        chromadb_host=settings.chroma.host,
+        chromadb_port=settings.chroma.port,
         ldap_config=ldap_config,
     )
+    rmq = settings.rabbitmq
     return MessageConsumer(
-        amqp_url=build_amqp_url(
-            os.getenv("RABBITMQ_HOST", "localhost"),
-            int(os.getenv("RABBITMQ_PORT", "5672")),
-            os.getenv("RABBITMQ_USER", "guest"),
-            os.getenv("RABBITMQ_PASSWORD", "guest"),
-            os.getenv("RABBITMQ_VHOST", "aegis"),
-        ),
-        queue_name=os.getenv("RABBITMQ_IDENTITY_QUEUE", "identity.sync"),
+        amqp_url=build_amqp_url(rmq.host, rmq.port, rmq.user, rmq.password, rmq.vhost),
+        queue_name=rmq.identity_queue,
         processor=processor,
         on_error="dead_letter",
     )

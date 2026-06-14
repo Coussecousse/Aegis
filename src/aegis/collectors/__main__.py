@@ -13,36 +13,24 @@ from typing import Any
 from dotenv import load_dotenv
 
 from aegis.collectors.wazuh_forwarder import WazuhForwarder
+from aegis.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_excluded_rules(raw: str) -> frozenset[int]:
-    """Parse a comma-separated rule-id list into a frozenset of ints (bad entries skipped)."""
-    rules: set[int] = set()
-    for token in raw.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        try:
-            rules.add(int(token))
-        except ValueError:
-            logger.warning("Ignoring non-integer WAZUH_EXCLUDED_RULES entry: %r", token)
-    return frozenset(rules)
-
-
-def _build_forwarder_from_env() -> WazuhForwarder:
-    """Build a ``WazuhForwarder`` using environment configuration."""
+def _build_forwarder(settings: Settings) -> WazuhForwarder:
+    """Build a ``WazuhForwarder`` from settings."""
+    rmq = settings.rabbitmq
     return WazuhForwarder(
-        rabbitmq_host=os.getenv("RABBITMQ_HOST", "localhost"),
-        rabbitmq_port=int(os.getenv("RABBITMQ_PORT", "5672")),
-        rabbitmq_user=os.getenv("RABBITMQ_USER", "guest"),
-        rabbitmq_password=os.getenv("RABBITMQ_PASSWORD", "guest"),
-        rabbitmq_vhost=os.getenv("RABBITMQ_VHOST", "aegis"),
+        rabbitmq_host=rmq.host,
+        rabbitmq_port=rmq.port,
+        rabbitmq_user=rmq.user,
+        rabbitmq_password=rmq.password,
+        rabbitmq_vhost=rmq.vhost,
         exchange_name="aegis.alerts",
         routing_key="alert.raw",
-        min_level=int(os.getenv("WAZUH_MIN_LEVEL", "7")),
-        excluded_rules=_parse_excluded_rules(os.getenv("WAZUH_EXCLUDED_RULES", "")),
+        min_level=settings.wazuh.min_level,
+        excluded_rules=settings.wazuh.excluded_rules,
     )
 
 
@@ -66,7 +54,7 @@ async def _run_integration_mode(alert_file: Path) -> int:
         logger.error("Alert file does not exist: %s", alert_file)
         return 1
 
-    forwarder = _build_forwarder_from_env()
+    forwarder = _build_forwarder(Settings.from_env())
     forwarded = 0
 
     await forwarder.connect()
@@ -105,10 +93,11 @@ def _extract_complete_lines(data: bytes) -> tuple[list[str], int]:
 
 async def _run_daemon_mode() -> int:
     """Tail alerts.json by polling and forward each new JSON line."""
-    alerts_file = Path(os.getenv("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json"))
-    poll_interval = float(os.getenv("WAZUH_POLL_INTERVAL", "1.0"))
+    settings = Settings.from_env()
+    alerts_file = Path(settings.wazuh.alerts_file)
+    poll_interval = settings.wazuh.poll_interval
 
-    forwarder = _build_forwarder_from_env()
+    forwarder = _build_forwarder(settings)
     await forwarder.connect()
 
     # Start at end of file: a restart must not replay the whole alert history

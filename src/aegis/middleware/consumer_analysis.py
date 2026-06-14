@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from contextlib import AsyncExitStack
 from typing import Any
 
 from pydantic import ValidationError
 
+from aegis.config import Settings
 from aegis.llm.client import OllamaClient
 from aegis.middleware.message_consumer import (
     MessageConsumer,
@@ -27,7 +27,6 @@ from aegis.middleware.models import EscalatedAlert
 from aegis.middleware.pipeline import analyze_log
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.soar.client import ShuffleClient
-from aegis.vault.loader import load_secrets_to_env
 
 logger = logging.getLogger(__name__)
 
@@ -104,31 +103,26 @@ class AnalysisProcessor:
             )
 
 
-def build_analysis_consumer_from_env(
-    metrics: MetricsCollector | None = None,
+def build_analysis_consumer(
+    settings: Settings, metrics: MetricsCollector | None = None
 ) -> MessageConsumer:
-    """Build the analysis MessageConsumer from environment variables.
+    """Build the analysis MessageConsumer from settings.
 
     Args:
+        settings: Application settings.
         metrics: Shared MetricsCollector instance (must be the same one passed to
             the triage consumer to avoid duplicate Prometheus registrations).
     """
-    load_secrets_to_env()
+    rmq = settings.rabbitmq
     processor = AnalysisProcessor(
-        ollama_base_url=os.getenv("OLLAMA_LLM_BASE_URL", "http://10.0.0.1:11435"),
-        shuffle_webhook_url=os.getenv("SHUFFLE_WEBHOOK_URL", "http://shuffle:3001/api/v1/hooks/"),
+        ollama_base_url=settings.ollama.llm_base_url,
+        shuffle_webhook_url=settings.shuffle_webhook_url,
         metrics=metrics,
-        llm_timeout=float(os.getenv("LLM_TIMEOUT", "45.0")),
+        llm_timeout=settings.ollama.llm_timeout,
     )
     return MessageConsumer(
-        amqp_url=build_amqp_url(
-            os.getenv("RABBITMQ_HOST", "localhost"),
-            int(os.getenv("RABBITMQ_PORT", "5672")),
-            os.getenv("RABBITMQ_USER", "guest"),
-            os.getenv("RABBITMQ_PASSWORD", "guest"),
-            os.getenv("RABBITMQ_VHOST", "aegis"),
-        ),
-        queue_name=os.getenv("RABBITMQ_REPORTS_QUEUE", "aegis.reports"),
+        amqp_url=build_amqp_url(rmq.host, rmq.port, rmq.user, rmq.password, rmq.vhost),
+        queue_name=rmq.reports_queue,
         processor=processor,
         on_error="requeue",
     )

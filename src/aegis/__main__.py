@@ -31,9 +31,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from prometheus_client import start_http_server
 
-from aegis.middleware.consumer import build_triage_consumer_from_env
-from aegis.middleware.consumer_analysis import build_analysis_consumer_from_env
-from aegis.middleware.consumer_identity import build_identity_consumer_from_env
+from aegis.config import Settings
+from aegis.middleware.consumer import build_triage_consumer
+from aegis.middleware.consumer_analysis import build_analysis_consumer
+from aegis.middleware.consumer_identity import build_identity_consumer
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.vault.loader import load_secrets_to_env
 
@@ -118,20 +119,21 @@ async def main() -> None:
     metrics_collector = MetricsCollector()
     logging.info("Prometheus metrics endpoint started on port 8080")
 
-    _shuffle_webhook_url = os.getenv("SHUFFLE_WEBHOOK_URL", "http://shuffle:3001/api/v1/hooks/")
-    _shuffle_host = urllib.parse.urlparse(_shuffle_webhook_url).hostname or ""
+    # Composition root: assemble settings once (Vault already loaded in __main__),
+    # then build all consumers from it. The triage and analysis consumers share one
+    # MetricsCollector — Prometheus rejects duplicate registrations on a registry.
+    settings = Settings.from_env()
+
+    _shuffle_host = urllib.parse.urlparse(settings.shuffle_webhook_url).hostname or ""
     if _shuffle_host == "shuffle":
         logging.warning(
             "SHUFFLE_WEBHOOK_URL points to 'shuffle' hostname — "
             "ensure the stack is started with --profile full or override SHUFFLE_WEBHOOK_URL"
         )
 
-    # Each builder reads its own config from the environment. The triage and
-    # analysis consumers share one MetricsCollector — Prometheus rejects duplicate
-    # registrations on a shared registry.
-    triage_consumer = build_triage_consumer_from_env(metrics=metrics_collector)
-    analysis_consumer = build_analysis_consumer_from_env(metrics=metrics_collector)
-    identity_consumer = build_identity_consumer_from_env()
+    triage_consumer = build_triage_consumer(settings, metrics=metrics_collector)
+    analysis_consumer = build_analysis_consumer(settings, metrics=metrics_collector)
+    identity_consumer = build_identity_consumer(settings)
 
     # Start all three consumers concurrently — triage, analysis, identity sync
     try:

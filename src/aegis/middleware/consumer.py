@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from contextlib import AsyncExitStack
 from typing import Any
 
 from pydantic import ValidationError
 
+from aegis.config import Settings
 from aegis.llm.client import OllamaClient
 from aegis.middleware.message_consumer import (
     MessageConsumer,
@@ -27,7 +27,6 @@ from aegis.middleware.models import WazuhLog
 from aegis.middleware.pipeline import triage_log
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
-from aegis.vault.loader import load_secrets_to_env
 
 logger = logging.getLogger(__name__)
 
@@ -108,27 +107,23 @@ class TriageProcessor:
             logger.debug(json.dumps({"event": "alert_discarded", "alert_id": str(log.id)}))
 
 
-def build_triage_consumer_from_env(metrics: MetricsCollector | None = None) -> MessageConsumer:
-    """Build the triage MessageConsumer from environment variables."""
-    load_secrets_to_env()
+def build_triage_consumer(
+    settings: Settings, metrics: MetricsCollector | None = None
+) -> MessageConsumer:
+    """Build the triage MessageConsumer from settings."""
+    rmq = settings.rabbitmq
     processor = TriageProcessor(
-        ollama_base_url=os.getenv("OLLAMA_SLM_BASE_URL", "http://10.0.0.1:11434"),
-        chromadb_host=os.getenv("CHROMADB_HOST", "localhost"),
-        chromadb_port=int(os.getenv("CHROMADB_PORT", "8000")),
+        ollama_base_url=settings.ollama.slm_base_url,
+        chromadb_host=settings.chroma.host,
+        chromadb_port=settings.chroma.port,
         metrics=metrics,
-        suspicion_threshold=float(os.getenv("SUSPICION_THRESHOLD", "0.5")),
-        slm_timeout=float(os.getenv("SLM_TIMEOUT", "10.0")),
+        suspicion_threshold=settings.suspicion_threshold,
+        slm_timeout=settings.ollama.slm_timeout,
     )
     return MessageConsumer(
-        amqp_url=build_amqp_url(
-            os.getenv("RABBITMQ_HOST", "localhost"),
-            int(os.getenv("RABBITMQ_PORT", "5672")),
-            os.getenv("RABBITMQ_USER", "guest"),
-            os.getenv("RABBITMQ_PASSWORD", "guest"),
-            os.getenv("RABBITMQ_VHOST", "aegis"),
-        ),
-        queue_name=os.getenv("RABBITMQ_QUEUE", "aegis.triage"),
+        amqp_url=build_amqp_url(rmq.host, rmq.port, rmq.user, rmq.password, rmq.vhost),
+        queue_name=rmq.triage_queue,
         processor=processor,
         on_error="requeue",
-        exchange_name=os.getenv("RABBITMQ_EXCHANGE", "aegis.alerts"),
+        exchange_name=rmq.exchange,
     )
