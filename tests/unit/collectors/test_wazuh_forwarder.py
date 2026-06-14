@@ -72,6 +72,26 @@ def test_parse_alert_with_mitre() -> None:
     assert parsed.mitre_technique == "T1110"
 
 
+def test_parse_alert_excluded_rule_returns_none() -> None:
+    payload = _valid_alert()
+    payload["rule"]["id"] = "533"
+
+    parsed = WazuhAlertParser.parse_alert(payload, min_level=7, excluded_rules=frozenset({533}))
+
+    assert parsed is None
+
+
+def test_parse_alert_non_excluded_rule_passes() -> None:
+    # Same agent/level, a rule that is not in the exclusion set still forwards —
+    # proving the filter is scoped by rule, not by agent (no detection blackout).
+    parsed = WazuhAlertParser.parse_alert(
+        _valid_alert(), min_level=7, excluded_rules=frozenset({533})
+    )
+
+    assert parsed is not None
+    assert parsed.rule_id == 5710
+
+
 def test_parse_alert_missing_fields_returns_none() -> None:
     payload = _valid_alert()
     del payload["rule"]
