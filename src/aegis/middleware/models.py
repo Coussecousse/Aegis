@@ -26,7 +26,15 @@ class WazuhLog(BaseModel):
     id: UUID = Field(..., description="Unique log identifier (UUID v4)")
     timestamp: datetime = Field(..., description="ISO 8601 timestamp")
     source_agent: str = Field(..., description="Name of the machine that generated the alert")
-    source_ip: str = Field(..., description="Source IP address (IPv4 or IPv6)")
+    source_ip: str = Field(..., description="Asset/host IP the agent runs on (used for RAG lookup)")
+    attacker_ip: str | None = Field(
+        None,
+        description=(
+            "Real actor IP from the event payload (data.srcip), when it differs from the "
+            "agent host IP — e.g. the remote client of a web attack. None when the alert "
+            "carries no distinct actor IP."
+        ),
+    )
     rule_id: int = Field(..., ge=1, description="Wazuh rule identifier")
     rule_level: int = Field(..., ge=0, le=15, description="Wazuh severity level (0-15)")
     rule_description: str = Field(..., description="Readable rule description")

@@ -56,6 +56,11 @@ class WazuhAlertParser:
         if not isinstance(source_ip_raw, str) or not source_ip_raw:
             source_ip_raw = WazuhAlertParser._read_nested_string(payload, "data", "srcip")
 
+        # Real actor IP: data.srcip is the remote client (e.g. a web attacker), distinct
+        # from the agent host IP. Surface it so the report cites the attacker, not the host.
+        data_srcip = WazuhAlertParser._read_nested_string(payload, "data", "srcip")
+        attacker_ip = data_srcip if data_srcip and data_srcip != source_ip_raw else None
+
         full_log = payload.get("full_log")
 
         if (
@@ -101,6 +106,7 @@ class WazuhAlertParser:
                 rule_description=rule_description,
                 source_agent=source_agent,
                 source_ip=source_ip_raw,
+                attacker_ip=attacker_ip,
                 full_log=full_log,
                 decoder_name=decoder_name,
                 mitre_technique=mitre_technique,
