@@ -66,6 +66,28 @@ async def _run_integration_mode(alert_file: Path) -> int:
     return 0
 
 
+def _extract_complete_lines(data: bytes) -> tuple[list[str], int]:
+    """Split a byte chunk into complete (newline-terminated) lines.
+
+    Returns the decoded non-empty complete lines and the number of bytes they
+    occupy. A trailing partial line (Wazuh still mid-write) is left unconsumed
+    so a record split across two polls is never truncated and dropped.
+
+    Args:
+        data: Bytes read from the current file position to EOF.
+
+    Returns:
+        Tuple of (complete lines, bytes consumed). ``([], 0)`` when no full line
+        is available yet.
+    """
+    last_newline = data.rfind(b"\n")
+    if last_newline == -1:
+        return [], 0
+    complete = data[: last_newline + 1]
+    text = complete.decode("utf-8", errors="replace")
+    return [line for line in text.splitlines() if line.strip()], len(complete)
+
+
 async def _run_daemon_mode() -> int:
     """Tail alerts.json by polling and forward each new JSON line."""
     alerts_file = Path(os.getenv("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json"))
@@ -74,27 +96,40 @@ async def _run_daemon_mode() -> int:
     forwarder = _build_forwarder_from_env()
     await forwarder.connect()
 
-    logger.info("Daemon mode started: file=%s poll_interval=%s", alerts_file, poll_interval)
+    # Start at end of file: a restart must not replay the whole alert history
+    # (which floods the pipeline with stale alerts). Only forward what arrives next.
+    position = alerts_file.stat().st_size if alerts_file.exists() else 0
 
-    position = 0
+    logger.info(
+        "Daemon mode started: file=%s poll_interval=%s start_offset=%s",
+        alerts_file,
+        poll_interval,
+        position,
+    )
+
     try:
         while True:
             if not alerts_file.exists():
                 await asyncio.sleep(poll_interval)
                 continue
 
-            if alerts_file.stat().st_size < position:
+            size = alerts_file.stat().st_size
+            if size < position:  # file rotated/truncated → restart from the top
                 position = 0
+            if size == position:  # nothing new
+                await asyncio.sleep(poll_interval)
+                continue
 
-            with alerts_file.open("r", encoding="utf-8", errors="replace") as handle:
+            # Binary read so the offset is an exact byte count; only advance past
+            # complete lines so a partial trailing record survives to the next poll.
+            with alerts_file.open("rb") as handle:
                 handle.seek(position)
-                lines = handle.readlines()
-                position = handle.tell()
+                data = handle.read()
+
+            lines, consumed = _extract_complete_lines(data)
+            position += consumed
 
             for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
                 try:
                     payload = json.loads(line)
                 except json.JSONDecodeError:
