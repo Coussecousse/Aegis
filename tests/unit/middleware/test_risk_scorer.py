@@ -365,3 +365,59 @@ class TestCategorizeUncertainty:
         assert _categorize_uncertainty(0.25) == "high"
         assert _categorize_uncertainty(0.5) == "high"
         assert _categorize_uncertainty(1.0) == "high"
+
+
+def _suspect_pair() -> tuple[SlmResponse, LlmResponse]:
+    """A confirmed-attack SLM/LLM pair for UEBA-factor tests."""
+    slm = SlmResponse(
+        is_suspect=True,
+        confidence=0.85,
+        behavior_category="normal",
+        reasoning_short="SQLi probe",
+        raw_probabilities={"suspect": 0.85, "benign": 0.15},
+    )
+    llm = LlmResponse(
+        attack_confirmed=True,
+        confidence=1.0,
+        attack_type="SQL injection",
+        severity="high",
+        affected_asset="node1-host",
+        asset_criticality="tier2",
+        plain_language_summary="Confirmed SQLi.",
+        recommended_action="Block the IP.",
+        requires_human_validation=True,
+        raw_probabilities={"attack": 1.0, "false_positive": 0.0},
+    )
+    return slm, llm
+
+
+def test_no_baseline_skips_ueba_penalty() -> None:
+    # Unprofiled asset (has_baseline=False): no 0.70 penalty, so a confirmed
+    # attack is not capped at "medium".
+    slm, llm = _suspect_pair()
+    score = compute_risk_score(
+        slm=slm,
+        llm=llm,
+        rule_level=7,
+        asset_criticality="tier2",
+        ueba_anomaly_score=0.0,
+        has_baseline=False,
+    )
+    assert score.score_breakdown["ueba_factor"] == 1.0
+    # base = 0.85*0.30 + 1.0*0.50 + (7/15)*0.20 = 0.8483 → *1.0*1.0
+    assert score.danger_score >= 0.6  # now reaches "high", not "medium"
+
+
+def test_baseline_normal_keeps_ueba_penalty() -> None:
+    # A real baseline reporting normal behaviour keeps the 0.70 penalty.
+    slm, llm = _suspect_pair()
+    score = compute_risk_score(
+        slm=slm,
+        llm=llm,
+        rule_level=7,
+        asset_criticality="tier2",
+        ueba_anomaly_score=0.0,
+        has_baseline=True,
+    )
+    assert score.score_breakdown["ueba_factor"] == 0.7
+    assert score.danger_score < 0.6  # capped to "medium" band
