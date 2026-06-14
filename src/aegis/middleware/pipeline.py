@@ -39,6 +39,7 @@ from aegis.middleware.models import (
     SlmResponse,
     WazuhLog,
 )
+from aegis.middleware.playbooks import render_playbook_action
 from aegis.middleware.prompt_builder import (
     build_llm_prompt,
     build_slm_prompt,
@@ -497,6 +498,14 @@ async def analyze_log(
         requires_human = llm.requires_human_validation
         # Even if LLM says no human needed, v0.2 always requires it
         requires_human = True
+
+    # For known attack classes, override the free-form action with a vetted,
+    # field-substituted playbook step — deterministic and auditable, where the
+    # LLM tends to copy examples or hallucinate (e.g. "disable the account" on
+    # a SQL injection). The LLM keeps ownership of the narrative summary.
+    playbook_action = render_playbook_action(log)
+    if playbook_action is not None:
+        recommended_action = playbook_action
 
     decision = Decision(
         severity=severity,
