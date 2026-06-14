@@ -71,11 +71,21 @@ def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
     # single-field JSON (just a copied recommended_action example). Ending on an
     # explicit TASK that re-lists every required key, anchored on the Log line,
     # counteracts that recency bias.
+    # Name the real actor explicitly: source_ip is the targeted host, attacker_ip (when
+    # present) is the remote client — without this the model cites the host, not the attacker.
+    if log.attacker_ip:
+        actor_line = (
+            f"Attacker: {log.attacker_ip} -> "
+            f"Target host: {log.source_agent} ({log.source_ip})\n"
+        )
+    else:
+        actor_line = f"Machine: {log.source_agent} ({log.source_ip})\n"
+
     return (
         f"--- ALERT ---\n"
         f"Rule: {log.rule_id} | Level: {log.rule_level}/15\n"
         f"Description: {log.rule_description}\n"
-        f"Machine: {log.source_agent} ({log.source_ip})\n"
+        f"{actor_line}"
         f"MITRE: {log.mitre_technique or 'N/A'}\n"
         f"Log: {full_log_truncated}\n"
         f"\n"
