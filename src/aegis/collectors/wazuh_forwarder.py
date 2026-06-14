@@ -26,12 +26,18 @@ class WazuhAlertParser:
     def parse_alert(
         payload: dict[str, Any],
         min_level: int = 7,
+        excluded_rules: frozenset[int] = frozenset(),
     ) -> WazuhLog | None:
         """Map a Wazuh JSON alert into a validated ``WazuhLog`` instance.
 
         Args:
             payload: Raw Wazuh alert JSON object.
             min_level: Minimum ``rule.level`` required to forward the alert.
+            excluded_rules: Rule ids to drop as known noise (e.g. host
+                self-monitoring like netstat port changes). Filtering by rule —
+                not by agent — because a single Wazuh agent here covers both the
+                AEGIS infra host and the monitored targets, so excluding the
+                agent would blind real detections.
 
         Returns:
             ``WazuhLog`` when mapping succeeds and threshold is met, otherwise ``None``.
@@ -92,6 +98,11 @@ class WazuhAlertParser:
         # Wazuh operational rules: agent lifecycle events, not security alerts
         _operational_rules = {501, 502, 503, 510, 511, 512, 513}
         if rule_id in _operational_rules:
+            return None
+
+        # Operator-configured noise (e.g. infra host self-monitoring): drop early
+        # so it never consumes an LLM analysis cycle.
+        if rule_id in excluded_rules:
             return None
 
         mitre_technique = WazuhAlertParser._extract_mitre_technique(payload)
@@ -179,6 +190,7 @@ class WazuhForwarder:
     exchange_name: str = "aegis.alerts"
     routing_key: str = "alert.raw"
     min_level: int = 7
+    excluded_rules: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
         """Initialize non-dataclass runtime attributes."""
@@ -217,7 +229,9 @@ class WazuhForwarder:
         Returns:
             ``True`` when a message was published, ``False`` when skipped or invalid.
         """
-        parsed = WazuhAlertParser.parse_alert(payload, min_level=self.min_level)
+        parsed = WazuhAlertParser.parse_alert(
+            payload, min_level=self.min_level, excluded_rules=self.excluded_rules
+        )
         if parsed is None:
             return False
 

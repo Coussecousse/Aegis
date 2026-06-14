@@ -17,6 +17,20 @@ from aegis.collectors.wazuh_forwarder import WazuhForwarder
 logger = logging.getLogger(__name__)
 
 
+def _parse_excluded_rules(raw: str) -> frozenset[int]:
+    """Parse a comma-separated rule-id list into a frozenset of ints (bad entries skipped)."""
+    rules: set[int] = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            rules.add(int(token))
+        except ValueError:
+            logger.warning("Ignoring non-integer WAZUH_EXCLUDED_RULES entry: %r", token)
+    return frozenset(rules)
+
+
 def _build_forwarder_from_env() -> WazuhForwarder:
     """Build a ``WazuhForwarder`` using environment configuration."""
     return WazuhForwarder(
@@ -28,6 +42,7 @@ def _build_forwarder_from_env() -> WazuhForwarder:
         exchange_name="aegis.alerts",
         routing_key="alert.raw",
         min_level=int(os.getenv("WAZUH_MIN_LEVEL", "7")),
+        excluded_rules=_parse_excluded_rules(os.getenv("WAZUH_EXCLUDED_RULES", "")),
     )
 
 
