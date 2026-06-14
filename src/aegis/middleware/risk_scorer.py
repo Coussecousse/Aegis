@@ -38,6 +38,7 @@ def compute_risk_score(
     rule_level: int,
     asset_criticality: str,
     ueba_anomaly_score: float = 0.5,
+    has_baseline: bool = True,
 ) -> RiskScore:
     """
     Compute composite danger score and uncertainty metrics.
@@ -91,9 +92,15 @@ def compute_risk_score(
     # Weighted composite score (before criticality and UEBA modifiers)
     base_score = (slm.confidence * 0.30) + (llm_confidence * 0.50) + (rule_component * 0.20)
 
-    # UEBA factor: normal behaviour (score=0) reduces danger by up to 30%;
-    # highly anomalous behaviour (score=1) leaves the score unchanged.
-    ueba_factor = 0.70 + (min(1.0, max(0.0, ueba_anomaly_score)) * 0.30)
+    # UEBA factor: a real baseline reporting normal behaviour (score=0) reduces
+    # danger by up to 30%; highly anomalous behaviour (score=1) leaves it unchanged.
+    # Without a baseline (unprofiled asset), anomaly_score=0.0 means "unknown", not
+    # "confirmed normal" — applying the penalty would cap confirmed attacks at medium,
+    # contradicting the triage fail-open. So leave the score unchanged (factor 1.0).
+    if has_baseline:
+        ueba_factor = 0.70 + (min(1.0, max(0.0, ueba_anomaly_score)) * 0.30)
+    else:
+        ueba_factor = 1.0
 
     # Apply criticality multiplier and UEBA factor, then clamp to [0.0, 1.0]
     criticality_mult = CRITICALITY_MULTIPLIERS[asset_criticality]

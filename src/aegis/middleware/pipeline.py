@@ -433,6 +433,7 @@ async def analyze_log(
             rule_level=log.rule_level,
             asset_criticality=rag.asset_criticality,
             ueba_anomaly_score=rag.ueba.anomaly_score,
+            has_baseline=rag.ueba.has_baseline,
         )
 
         logger.info(
