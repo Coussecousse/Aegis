@@ -59,16 +59,22 @@ class _FakeShuffleClient:
         return True
 
 
-def _make_log(rule_level: int = 8) -> WazuhLog:
+def _make_log(
+    rule_level: int = 8,
+    rule_id: int = 1001,
+    full_log: str = "cmd.exe /c whoami",
+    attacker_ip: str | None = None,
+) -> WazuhLog:
     return WazuhLog(
         id=uuid4(),
         timestamp=datetime.now(UTC),
         source_agent="WS-01",
         source_ip="10.0.0.10",
-        rule_id=1001,
+        attacker_ip=attacker_ip,
+        rule_id=rule_id,
         rule_level=rule_level,
         rule_description="Suspicious activity",
-        full_log="cmd.exe /c whoami",
+        full_log=full_log,
         mitre_technique="T1021",
         decoder_name="windows-eventlog",
     )
@@ -217,6 +223,28 @@ async def test_pipeline_baseline_normal_discards_before_llm() -> None:
     assert result is None
     assert ollama.calls == ["qwen25-aegis"]
     assert shuffle.reports_sent == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_known_rule_uses_playbook_action() -> None:
+    # For a known rule (31103 SQLi) the recommended_action must come from the
+    # deterministic playbook (attacker IP + endpoint), not the LLM's free text.
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=False))
+    shuffle = _FakeShuffleClient()
+    log = _make_log(
+        rule_level=10,
+        rule_id=31103,
+        full_log='172.18.0.1 - - [..] "GET /rest/products/search?q=x HTTP/1.1" 500',
+        attacker_ip="172.18.0.1",
+    )
+
+    result = await _run_pipeline(log, ollama, chroma, shuffle)
+
+    assert result is not None
+    assert result.decision.recommended_action != "Block the source IP at the firewall."
+    assert "172.18.0.1" in result.decision.recommended_action
+    assert "/rest/products/search?q=x" in result.decision.recommended_action
 
 
 @pytest.mark.asyncio
