@@ -24,7 +24,6 @@ Zero cloud calls. Zero automatic remediation (human validation required).
 
 import json
 import logging
-import os
 import time
 from datetime import UTC, datetime
 from typing import Literal
@@ -51,15 +50,10 @@ from aegis.soar.client import ShuffleClient
 
 logger = logging.getLogger(__name__)
 
-# Model names configurable via env — change SLM/LLM without code rebuild.
-_SLM_MODEL = os.getenv("SLM_MODEL", "qwen25-aegis")
-_LLM_MODEL = os.getenv("LLM_MODEL", "mistral-aegis")
-
-# Opt-in Ollama structured outputs for the LLM: constrains decoding to the
-# LlmResponse JSON Schema so the model cannot emit a partial/degenerate object.
-# Requires Ollama >= 0.5 on the inference node; left off by default so an older
-# Ollama is not broken by an unsupported `format` payload.
-_LLM_USE_SCHEMA = os.getenv("LLM_USE_SCHEMA", "false").strip().lower() == "true"
+# Fallback model names when a caller doesn't pass one (the consumers always do,
+# sourced from Settings/env). Kept as literals so config lives only in Settings.
+_DEFAULT_SLM_MODEL = "qwen25-aegis"
+_DEFAULT_LLM_MODEL = "mistral-aegis"
 
 
 async def triage_log(
@@ -69,6 +63,7 @@ async def triage_log(
     metrics: MetricsCollector | None = None,
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,
+    slm_model: str = _DEFAULT_SLM_MODEL,
 ) -> EscalatedAlert | None:
     """
     Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
@@ -128,7 +123,7 @@ async def triage_log(
 
         slm_prompt = build_slm_prompt(log)
         slm_response_dict = await ollama_client.generate(
-            model=_SLM_MODEL,
+            model=slm_model,
             prompt=slm_prompt,
             timeout=slm_timeout,
             keep_alive=-1,  # keep SLM permanently in RAM — Pi 16 GB holds both models
@@ -320,6 +315,8 @@ async def analyze_log(
     shuffle_client: ShuffleClient,
     metrics: MetricsCollector | None = None,
     llm_timeout: float = 45.0,
+    llm_model: str = _DEFAULT_LLM_MODEL,
+    use_schema: bool = False,
 ) -> AegisReport | None:
     """
     Run the slow analysis stage of the AEGIS pipeline (LLM + risk + report + SOAR).
@@ -368,7 +365,7 @@ async def analyze_log(
 
         llm_prompt = build_llm_prompt(log, slm, rag)
         llm_response_dict = await ollama_client.generate(
-            model=_LLM_MODEL,
+            model=llm_model,
             prompt=llm_prompt,
             timeout=llm_timeout,
             keep_alive=-1,  # Pi 16 GB holds both SLM and LLM — no swap needed
@@ -377,7 +374,7 @@ async def analyze_log(
             # invalid JSON that was discarded into the SLM fallback. Set here (not only in
             # the Modelfile) so the cap holds regardless of the deployed model build.
             num_predict=768,
-            format_schema=LlmResponse.model_json_schema() if _LLM_USE_SCHEMA else None,
+            format_schema=LlmResponse.model_json_schema() if use_schema else None,
         )
 
         llm = LlmResponse(**llm_response_dict)

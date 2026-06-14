@@ -17,7 +17,6 @@ from aegis.middleware.message_consumer import (
     MessageConsumer,
     Publisher,
     UnprocessableMessageError,
-    build_amqp_url,
 )
 from aegis.rag.client import ChromaDBClient
 from aegis.rag.ldap import LdapConfig, LdapConnector
@@ -92,7 +91,7 @@ def build_identity_consumer(settings: Settings) -> MessageConsumer:
     )
     rmq = settings.rabbitmq
     return MessageConsumer(
-        amqp_url=build_amqp_url(rmq.host, rmq.port, rmq.user, rmq.password, rmq.vhost),
+        amqp_url=rmq.amqp_url,
         queue_name=rmq.identity_queue,
         processor=processor,
         on_error="dead_letter",

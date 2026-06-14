@@ -21,7 +21,6 @@ from aegis.middleware.message_consumer import (
     MessageConsumer,
     Publisher,
     UnprocessableMessageError,
-    build_amqp_url,
 )
 from aegis.middleware.models import EscalatedAlert
 from aegis.middleware.pipeline import analyze_log
@@ -41,11 +40,15 @@ class AnalysisProcessor:
         shuffle_webhook_url: str = "http://shuffle:3001/api/v1/hooks/",
         metrics: MetricsCollector | None = None,
         llm_timeout: float = 45.0,
+        llm_model: str = "mistral-aegis",
+        use_schema: bool = False,
     ) -> None:
         self.ollama_base_url = ollama_base_url
         self.shuffle_webhook_url = shuffle_webhook_url
         self.metrics = metrics
         self.llm_timeout = llm_timeout
+        self.llm_model = llm_model
+        self.use_schema = use_schema
 
         self._stack: AsyncExitStack | None = None
         self._ollama: OllamaClient | None = None
@@ -79,6 +82,8 @@ class AnalysisProcessor:
             shuffle_client=self._shuffle,
             metrics=self.metrics,
             llm_timeout=self.llm_timeout,
+            llm_model=self.llm_model,
+            use_schema=self.use_schema,
         )
 
         if report is not None:
@@ -119,9 +124,11 @@ def build_analysis_consumer(
         shuffle_webhook_url=settings.shuffle_webhook_url,
         metrics=metrics,
         llm_timeout=settings.ollama.llm_timeout,
+        llm_model=settings.ollama.llm_model,
+        use_schema=settings.ollama.use_schema,
     )
     return MessageConsumer(
-        amqp_url=build_amqp_url(rmq.host, rmq.port, rmq.user, rmq.password, rmq.vhost),
+        amqp_url=rmq.amqp_url,
         queue_name=rmq.reports_queue,
         processor=processor,
         on_error="requeue",

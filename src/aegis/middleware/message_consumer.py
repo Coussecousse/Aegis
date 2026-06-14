@@ -19,7 +19,6 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, Protocol
-from urllib.parse import quote
 
 import aio_pika
 from aio_pika.abc import (
@@ -66,14 +65,6 @@ class MessageProcessor(Protocol):
         ...
 
 
-def build_amqp_url(host: str, port: int, user: str, password: str | None, vhost: str) -> str:
-    """Build a percent-encoded amqp:// URL from connection parts."""
-    encoded_user = quote(user or "", safe="")
-    encoded_password = quote(password or "", safe="")
-    encoded_vhost = quote(vhost or "/", safe="")
-    return f"amqp://{encoded_user}:{encoded_password}@{host}:{port}/{encoded_vhost}"
-
-
 class MessageConsumer:
     """Consume one RabbitMQ queue and drive a :class:`MessageProcessor`."""
 
@@ -91,7 +82,7 @@ class MessageConsumer:
         """Initialize the consumer.
 
         Args:
-            amqp_url: Full amqp:// connection URL (see :func:`build_amqp_url`).
+            amqp_url: Full amqp:// connection URL (e.g. ``RabbitMQSettings.amqp_url``).
             queue_name: Queue to consume (declared passively — must pre-exist).
             processor: Per-stage payload handler.
             on_error: Transient-failure policy: requeue for retry, or dead_letter.

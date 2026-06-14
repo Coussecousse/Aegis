@@ -34,7 +34,9 @@ def test_settings_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RABBITMQ_PORT", "5673")
     monkeypatch.setenv("CHROMADB_PORT", "9000")
     monkeypatch.setenv("SUSPICION_THRESHOLD", "0.7")
-    monkeypatch.setenv("LLM_USE_SCHEMA", "true")  # consumed elsewhere; must not break here
+    monkeypatch.setenv("SLM_MODEL", "qwen25-llm-aegis")
+    monkeypatch.setenv("LLM_MODEL", "mistral-custom")
+    monkeypatch.setenv("LLM_USE_SCHEMA", "true")
 
     settings = Settings.from_env()
 
@@ -42,6 +44,17 @@ def test_settings_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.rabbitmq.port == 5673
     assert settings.chroma.port == 9000
     assert settings.suspicion_threshold == 0.7
+    assert settings.ollama.slm_model == "qwen25-llm-aegis"
+    assert settings.ollama.llm_model == "mistral-custom"
+    assert settings.ollama.use_schema is True
+
+
+def test_rabbitmq_amqp_url_percent_encodes_credentials() -> None:
+    from aegis.config import RabbitMQSettings
+
+    rmq = RabbitMQSettings(host="rabbitmq", port=5672, user="u", password="p@ss!", vhost="aegis")
+
+    assert rmq.amqp_url == "amqp://u:p%40ss%21@rabbitmq:5672/aegis"  # pragma: allowlist secret
 
 
 def test_settings_excluded_rules_parsing(monkeypatch: pytest.MonkeyPatch) -> None:

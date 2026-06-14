@@ -7,13 +7,13 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
 from uuid import uuid4
 
 import aio_pika
 from aio_pika.abc import AbstractChannel, AbstractExchange, AbstractRobustConnection
 from pydantic import ValidationError
 
+from aegis.config import build_amqp_url
 from aegis.middleware.models import WazuhLog
 
 logger = logging.getLogger(__name__)
@@ -200,12 +200,12 @@ class WazuhForwarder:
 
     async def connect(self) -> None:
         """Establish RabbitMQ connection and resolve destination exchange."""
-        encoded_user = quote(self.rabbitmq_user or "", safe="")
-        encoded_password = quote(self.rabbitmq_password or "", safe="")
-        encoded_vhost = quote(self.rabbitmq_vhost or "/", safe="")
-        connection_url = (
-            f"amqp://{encoded_user}:{encoded_password}"
-            f"@{self.rabbitmq_host}:{self.rabbitmq_port}/{encoded_vhost}"
+        connection_url = build_amqp_url(
+            self.rabbitmq_host,
+            self.rabbitmq_port,
+            self.rabbitmq_user,
+            self.rabbitmq_password,
+            self.rabbitmq_vhost,
         )
 
         self._connection = await aio_pika.connect_robust(connection_url)

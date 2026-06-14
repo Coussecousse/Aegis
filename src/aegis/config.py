@@ -15,6 +15,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from urllib.parse import quote
+
+
+def build_amqp_url(host: str, port: int, user: str, password: str | None, vhost: str) -> str:
+    """Build a percent-encoded amqp:// URL from connection parts."""
+    encoded_user = quote(user or "", safe="")
+    encoded_password = quote(password or "", safe="")
+    encoded_vhost = quote(vhost or "/", safe="")
+    return f"amqp://{encoded_user}:{encoded_password}@{host}:{port}/{encoded_vhost}"
 
 
 def _excluded_rules(raw: str) -> frozenset[int]:
@@ -44,6 +53,11 @@ class RabbitMQSettings:
     identity_queue: str = "identity.sync"
     exchange: str = "aegis.alerts"
 
+    @property
+    def amqp_url(self) -> str:
+        """The percent-encoded amqp:// connection URL for these settings."""
+        return build_amqp_url(self.host, self.port, self.user, self.password, self.vhost)
+
     @classmethod
     def from_env(cls) -> RabbitMQSettings:
         return cls(
@@ -61,20 +75,26 @@ class RabbitMQSettings:
 
 @dataclass(frozen=True)
 class OllamaSettings:
-    """Ollama instance URLs and per-stage timeouts (model names live in pipeline)."""
+    """Ollama instance URLs, model names, per-stage timeouts, and decoding mode."""
 
     slm_base_url: str = "http://10.0.0.1:11434"
     llm_base_url: str = "http://10.0.0.1:11435"
+    slm_model: str = "qwen25-aegis"
+    llm_model: str = "mistral-aegis"
     slm_timeout: float = 10.0
     llm_timeout: float = 45.0
+    use_schema: bool = False
 
     @classmethod
     def from_env(cls) -> OllamaSettings:
         return cls(
             slm_base_url=os.getenv("OLLAMA_SLM_BASE_URL", "http://10.0.0.1:11434"),
             llm_base_url=os.getenv("OLLAMA_LLM_BASE_URL", "http://10.0.0.1:11435"),
+            slm_model=os.getenv("SLM_MODEL", "qwen25-aegis"),
+            llm_model=os.getenv("LLM_MODEL", "mistral-aegis"),
             slm_timeout=float(os.getenv("SLM_TIMEOUT", "10.0")),
             llm_timeout=float(os.getenv("LLM_TIMEOUT", "45.0")),
+            use_schema=os.getenv("LLM_USE_SCHEMA", "false").strip().lower() == "true",
         )
 
 

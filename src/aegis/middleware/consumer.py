@@ -21,7 +21,6 @@ from aegis.middleware.message_consumer import (
     MessageConsumer,
     Publisher,
     UnprocessableMessageError,
-    build_amqp_url,
 )
 from aegis.middleware.models import WazuhLog
 from aegis.middleware.pipeline import triage_log
@@ -47,6 +46,7 @@ class TriageProcessor:
         metrics: MetricsCollector | None = None,
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
+        slm_model: str = "qwen25-aegis",
     ) -> None:
         self.ollama_base_url = ollama_base_url
         self.chromadb_host = chromadb_host
@@ -54,6 +54,7 @@ class TriageProcessor:
         self.metrics = metrics
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
+        self.slm_model = slm_model
 
         self._stack: AsyncExitStack | None = None
         self._ollama: OllamaClient | None = None
@@ -89,6 +90,7 @@ class TriageProcessor:
             metrics=self.metrics,
             suspicion_threshold=self.suspicion_threshold,
             slm_timeout=self.slm_timeout,
+            slm_model=self.slm_model,
         )
 
         if escalated is not None:
@@ -119,9 +121,10 @@ def build_triage_consumer(
         metrics=metrics,
         suspicion_threshold=settings.suspicion_threshold,
         slm_timeout=settings.ollama.slm_timeout,
+        slm_model=settings.ollama.slm_model,
     )
     return MessageConsumer(
-        amqp_url=build_amqp_url(rmq.host, rmq.port, rmq.user, rmq.password, rmq.vhost),
+        amqp_url=rmq.amqp_url,
         queue_name=rmq.triage_queue,
         processor=processor,
         on_error="requeue",
