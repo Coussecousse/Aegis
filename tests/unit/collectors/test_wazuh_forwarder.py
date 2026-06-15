@@ -140,13 +140,14 @@ def test_parse_alert_promiscuous_mode_from_other_process_passes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_forwarder_publishes_to_exchange() -> None:
-    published: list[str] = []
+async def test_forwarder_publishes_persistent_to_exchange() -> None:
+    import aio_pika
+
+    published: list[tuple[str, object]] = []
 
     class _FakeExchange:
         async def publish(self, message: object, routing_key: str) -> None:
-            _ = message
-            published.append(routing_key)
+            published.append((routing_key, message))
 
     forwarder = WazuhForwarder(min_level=7)
     forwarder._exchange = _FakeExchange()  # noqa: SLF001
@@ -154,4 +155,6 @@ async def test_forwarder_publishes_to_exchange() -> None:
     sent = await forwarder.forward_alert(_valid_alert())
 
     assert sent is True
-    assert published == ["alert.raw"]
+    assert [rk for rk, _ in published] == ["alert.raw"]
+    # An escalated/raw alert must survive a broker restart — published persistent.
+    assert published[0][1].delivery_mode == aio_pika.DeliveryMode.PERSISTENT

@@ -239,7 +239,11 @@ class WazuhForwarder:
             raise RuntimeError("WazuhForwarder is not connected")
 
         body = json.dumps(parsed.model_dump(mode="json")).encode("utf-8")
-        message = aio_pika.Message(body=body, content_type="application/json")
+        message = aio_pika.Message(
+            body=body,
+            content_type="application/json",
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        )
         await self._exchange.publish(message, routing_key=self.routing_key)
         logger.debug(
             "Forwarded Wazuh alert rule_id=%s level=%s source_ip=%s",

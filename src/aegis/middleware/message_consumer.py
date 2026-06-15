@@ -124,10 +124,19 @@ class MessageConsumer:
         logger.info(f"Connected to RabbitMQ. Listening to queue: {self._queue_name}")
 
     async def _publish(self, routing_key: str, body: bytes) -> None:
-        """Publish a message body to the resolved exchange."""
+        """Publish a message body to the resolved exchange.
+
+        Messages are persistent so a broker restart cannot lose an in-flight
+        escalation, and the channel uses publisher confirms (aio-pika default) so
+        ``publish`` only returns once the broker has accepted the message.
+        """
         if self._exchange is None:
             raise RuntimeError("MessageConsumer has no exchange to publish to")
-        message = aio_pika.Message(body=body, content_type="application/json")
+        message = aio_pika.Message(
+            body=body,
+            content_type="application/json",
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        )
         await self._exchange.publish(message, routing_key=routing_key)
 
     async def start(self) -> None:
