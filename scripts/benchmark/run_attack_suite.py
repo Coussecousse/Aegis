@@ -17,6 +17,7 @@ import argparse
 import base64
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import time
@@ -26,6 +27,22 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from scripts.benchmark import scenarios
+
+_CORPUS_LABELS = pathlib.Path(__file__).resolve().parents[2] / "tests/fixtures/corpus/labels.json"
+
+
+def _attack_corpus_ids(letters: list[str]) -> list[str]:
+    """Corpus attack ids whose scenario family matches the fired scenario letters."""
+    try:
+        labels = json.loads(_CORPUS_LABELS.read_text(encoding="utf-8"))
+    except OSError:
+        return []
+    wanted = {ltr.upper() for ltr in letters}
+    return [
+        cid
+        for cid, lab in labels.items()
+        if lab.get("is_attack") and lab.get("scenario", "")[:1].upper() in wanted
+    ]
 
 
 def _purge_queues() -> None:
@@ -90,6 +107,9 @@ def main() -> int:
     parser.add_argument("--host", default=os.getenv("BENCH_TARGET_HOST", "localhost"))
     parser.add_argument("--no-purge", action="store_true")
     parser.add_argument("--no-tools", action="store_true", help="skip external Kali tools")
+    parser.add_argument("--phase", choices=("raw", "quality", "load"), default="raw")
+    parser.add_argument("--manifest", default="/tmp/aegis-bench-manifest.json")  # noqa: S108
+    parser.add_argument("--actor-ip", default=None, help="override the attacker IP for scoring")
     args = parser.parse_args()
 
     ids = (
@@ -119,10 +139,32 @@ def main() -> int:
     }
     print(f"T1={t1.isoformat()}")
     print("WINDOW " + json.dumps(window))
-    print(
-        "\nNext: python -m scripts.benchmark.collect_kpis "
-        f"--since '{t0.isoformat()}' --until '{t1.isoformat()}'"
-    )
+
+    if args.phase != "raw":
+        manifest = {
+            "phase": args.phase,
+            "started": t0.isoformat(),
+            "ended": t1.isoformat(),
+            "actor_ip": args.actor_ip,
+            "web_requests_fired": len(run.web_requests),
+            # For quality scoring: corpus attack ids matching the fired scenarios.
+            "scenarios": _attack_corpus_ids(ids),
+            "scenario_letters": ids,
+        }
+        pathlib.Path(args.manifest).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"MANIFEST written to {args.manifest}")
+        if args.phase == "quality":
+            print("Next: python -m scripts.benchmark.score_phase1 " f"--manifest '{args.manifest}'")
+        else:
+            print(
+                "Next: python -m scripts.benchmark.collect_kpis "
+                f"--since '{t0.isoformat()}' --until '{t1.isoformat()}' --check-loss"
+            )
+    else:
+        print(
+            "\nNext: python -m scripts.benchmark.collect_kpis "
+            f"--since '{t0.isoformat()}' --until '{t1.isoformat()}'"
+        )
     return 0
 
 

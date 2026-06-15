@@ -72,6 +72,16 @@ benchmark: ## Live KPI run (needs stack + Pi). SCENARIO=all INTENSITY=standard
 	until=$$(grep -o '"t1": "[^"]*"' /tmp/aegis-bench-window.txt | head -1 | cut -d'"' -f4); \
 	$(VENV_BIN)/python -m scripts.benchmark.collect_kpis --since "$$since" --until "$$until"
 
+benchmark-quality: ## Phase 1: fire corpus attacks for quality scoring (needs report_sink + SHUFFLE_WEBHOOK_URL set to it). SCENARIO=all
+	$(VENV_BIN)/python -m scripts.benchmark.run_attack_suite --phase quality \
+	  --scenario "$(or $(SCENARIO),all)" --intensity "$(or $(INTENSITY),smoke)" \
+	  --manifest /tmp/aegis-quality-manifest.json
+	@echo "Wait for the Pi to produce reports, then: make benchmark-quality-score"
+
+benchmark-quality-score: ## Phase 1: grade captured reports vs the corpus
+	$(VENV_BIN)/python -m scripts.benchmark.score_phase1 \
+	  --manifest /tmp/aegis-quality-manifest.json --reports /tmp/aegis-reports.jsonl
+
 security-scan: ## Run bandit + pip-audit
 	$(VENV_BIN)/bandit -r src/ -ll
 	$(VENV_BIN)/pip-audit
