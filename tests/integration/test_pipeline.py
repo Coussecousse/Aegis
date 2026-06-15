@@ -226,6 +226,43 @@ async def test_pipeline_baseline_normal_discards_before_llm() -> None:
 
 
 @pytest.mark.asyncio
+async def test_triage_requests_identity_sync_for_unprofiled_asset() -> None:
+    # Unprofiled asset (has_baseline=False) → triage asks for an identity sync.
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=False))
+    requested: list[str] = []
+
+    async def _cb(asset_id: str) -> None:
+        requested.append(asset_id)
+
+    await triage_log(
+        log=_make_log(rule_level=7),
+        ollama_client=ollama,
+        chromadb_client=chroma,
+        on_unprofiled_asset=_cb,
+    )
+    assert requested == ["10.0.0.10"]  # _make_log source_ip
+
+
+@pytest.mark.asyncio
+async def test_triage_no_identity_sync_when_profiled() -> None:
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=True))
+    requested: list[str] = []
+
+    async def _cb(asset_id: str) -> None:
+        requested.append(asset_id)
+
+    await triage_log(
+        log=_make_log(rule_level=10),
+        ollama_client=ollama,
+        chromadb_client=chroma,
+        on_unprofiled_asset=_cb,
+    )
+    assert requested == []
+
+
+@pytest.mark.asyncio
 async def test_pipeline_known_rule_uses_playbook_action() -> None:
     # For a known rule (31103 SQLi) the recommended_action must come from the
     # deterministic playbook (attacker IP + endpoint), not the LLM's free text.

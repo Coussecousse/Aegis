@@ -141,6 +141,35 @@ async def test_triage_processor_discard_does_not_publish(monkeypatch: pytest.Mon
     assert published == []
 
 
+def test_should_request_sync_dedups_within_ttl() -> None:
+    proc = TriageProcessor()
+    assert proc._should_request_sync("1.1.1.1", 100.0) is True  # noqa: SLF001
+    assert proc._should_request_sync("1.1.1.1", 150.0) is False  # noqa: SLF001  # within TTL
+    assert proc._should_request_sync("1.1.1.1", 100.0 + 301.0) is True  # noqa: SLF001  # past TTL
+    assert proc._should_request_sync("2.2.2.2", 150.0) is True  # noqa: SLF001  # other asset
+
+
+@pytest.mark.asyncio
+async def test_process_publishes_identity_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = _entered_triage_processor()
+
+    async def _fake_triage_log(**kwargs: Any) -> None:
+        await kwargs["on_unprofiled_asset"]("9.9.9.9")  # simulate an unprofiled asset
+        return None
+
+    monkeypatch.setattr("aegis.middleware.consumer.triage_log", _fake_triage_log)
+
+    published: list[tuple[str, dict[str, Any]]] = []
+
+    async def _publish(routing_key: str, body: bytes) -> None:
+        published.append((routing_key, json.loads(body)))
+
+    await proc.process(_valid_log_payload(), _publish)
+    await proc.process(_valid_log_payload(), _publish)  # 2nd time → deduped
+
+    assert published == [("identity.sync", {"asset_id": "9.9.9.9"})]
+
+
 @pytest.mark.asyncio
 async def test_triage_processor_invalid_log_raises_unprocessable() -> None:
     proc = _entered_triage_processor()
