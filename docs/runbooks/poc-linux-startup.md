@@ -550,9 +550,10 @@ Remplacer `CHEMIN_ABSOLU_VERS_REPO` par le chemin réel vers le dépôt (ex. `/h
 
 Depuis la machine Kali sur le même réseau, cibler `http://NODE1_IP:9080` (Juice Shop via nginx).
 
-> Pour le scénario complet de mesure MTTT (bruit + exploit haute sévérité,
-> ADR 002), voir
-> [load-test-juiceshop-kali.md](load-test-juiceshop-kali.md).
+> Pour les scénarios d'attaque reproductibles et la mesure des KPI (MTTT, débit,
+> qualité des rapports, résilience), utiliser le harnais de benchmark —
+> `make benchmark` — documenté dans
+> [docs/benchmarks/README.md](../benchmarks/README.md) (ADR 002 + ADR 003).
 
 ### E.1 — Récupérer l'IP de Node1
 
