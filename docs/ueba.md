@@ -33,7 +33,7 @@ When triage sees an alert on an **unprofiled** asset, it enqueues an `identity.s
 job for that asset (with in-process TTL **dedup** so a burst enqueues one job). The
 [identity worker](../src/aegis/middleware/consumer_identity.py) then pulls the asset's
 context into ChromaDB. Self-limiting: once profiled, `has_baseline` flips True and
-triage stops asking. (Decision recorded in [adr/004-ueba-identity-driven.md](adr/004-ueba-identity-driven.md).)
+triage stops asking.
 
 ## 3. The triage gate
 

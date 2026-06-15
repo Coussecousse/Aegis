@@ -94,6 +94,8 @@ Reliability: durable queues, persistent messages, 1 h TTL + dead-letter to
 | `docs/wazuh-alerts.md` | Wazuh alert format ingested + filtering |
 | `docs/soar-response-actions.md` | Human-validated containment (Shuffle) — current + planned |
 | `docs/testing.md` | Test layers + how to run |
+| `docs/getting-started.md` | Setup steps + gotchas |
+| `docs/makefile.md` | Every make target |
 | `docs/benchmarks/README.md` | KPIs (targets, results, reproduce) |
 | `docs/runbooks/poc-linux-startup.md` | POC startup (Juice Shop, Kali, Shuffle) |
 | `docs/raspberrypi-ollama-setup.md` | Node 2 (Pi + Ollama) setup |

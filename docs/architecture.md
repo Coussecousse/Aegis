@@ -64,5 +64,6 @@ marker `benchmark`), `fixtures/corpus/` (labeled alert corpus). See [testing.md]
 | [runbooks/poc-linux-startup.md](runbooks/poc-linux-startup.md) | End-to-end POC startup (Juice Shop, Kali, Shuffle). |
 | [raspberrypi-ollama-setup.md](raspberrypi-ollama-setup.md) | Node 2 (Pi + Ollama) setup. |
 | [runbooks/wazuh-rules.md](runbooks/wazuh-rules.md) | Custom Wazuh rule reference. |
-| `adr/` | Architecture Decision Records. |
+| [makefile.md](makefile.md) | Every `make` target. |
+| [getting-started.md](getting-started.md) | Setup steps + gotchas. |
 | `modelfiles/` | Ollama Modelfiles for the Pi. |

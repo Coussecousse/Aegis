@@ -171,9 +171,10 @@ aegis/
     ├── wazuh-alerts.md         # Wazuh alert format ingested + filtering
     ├── soar-response-actions.md # Human-validated containment (Shuffle) — current + planned
     ├── testing.md              # Test layers + how to run
+    ├── makefile.md             # Every make target
+    ├── getting-started.md      # Setup steps + gotchas
     ├── benchmarks/README.md    # KPIs (targets, results, reproduce)
     ├── runbooks/               # poc-linux-startup.md, wazuh-rules.md
-    ├── adr/                    # Architecture Decision Records (MADR format)
     ├── modelfiles/             # Official Ollama Modelfiles for Raspberry Pi deployment
     └── raspberrypi-ollama-setup.md  # Raspberry Pi Ollama deployment guide
 ```

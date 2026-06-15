@@ -606,7 +606,7 @@ Depuis la machine Kali sur le même réseau, cibler `http://NODE1_IP:9080` (Juic
 > Pour les scénarios d'attaque reproductibles et la mesure des KPI (MTTT, débit,
 > qualité des rapports, résilience), utiliser le harnais de benchmark —
 > `make benchmark` — documenté dans
-> [docs/benchmarks/README.md](../benchmarks/README.md) (ADR 002 + ADR 003).
+> [docs/benchmarks/README.md](../benchmarks/README.md).
 
 ### E.1 — Récupérer l'IP de Node1
 
@@ -995,7 +995,7 @@ Modelfile: [Modelfile.slm-qwen25](../modelfiles/Modelfile.slm-qwen25).
 **What changed**: `triage_log()` now calls `MetricsCollector.record_triage()` on every
 exit path (suspicion-gate discard, RAG error, UEBA-gate discard, escalation), exposed as
 `aegis_pipeline_duration_seconds_bucket{stage="triage"}` — the MTTT (Mean Time To Triage)
-signal used by [ADR 002](../adr/002-mttt-measurement-protocol.md). The Crisis dashboard
+signal. The Crisis dashboard
 gained two panels: "MTTT — Triage Duration p50/p95" and "Queue Depth — aegis.triage /
 aegis.reports".
 
