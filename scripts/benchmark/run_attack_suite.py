@@ -100,7 +100,9 @@ def _run_tools(commands: list[list[str]]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="AEGIS attack-scenario replayer")
     parser.add_argument("--scenario", default="all", help="all | comma-separated ids (A..F)")
-    parser.add_argument("--intensity", default="standard", choices=("smoke", "standard", "soak"))
+    parser.add_argument(
+        "--intensity", default="standard", choices=("once", "smoke", "standard", "soak")
+    )
     parser.add_argument(
         "--base-url", default=os.getenv("BENCH_TARGET_URL", "http://localhost:9080")
     )

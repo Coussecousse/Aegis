@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Repeats applied to each web request path, per intensity.
-INTENSITY_REPEATS: dict[str, int] = {"smoke": 2, "standard": 10, "soak": 60}
+INTENSITY_REPEATS: dict[str, int] = {"once": 1, "smoke": 2, "standard": 10, "soak": 60}
 # Soak adds parallelism + a loop count to sustain a high log rate.
 SOAK_PARALLELISM = 6
 SOAK_LOOPS = 4

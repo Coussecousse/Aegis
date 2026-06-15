@@ -50,6 +50,14 @@ def test_correlate_disambiguates_shared_rule_id_by_url() -> None:
     assert score_phase1.correlate(cmd, _LABELS) == "E-cmd"
 
 
+def test_correlate_falls_back_to_url_when_rule_id_differs() -> None:
+    # Live target fires 31106 (web attack), not the synthetic corpus rule — match by endpoint.
+    live_xss = _report(31106, "/rest/products/search?q=<script>", "1.1.1.1", "a", "t", "s")
+    assert score_phase1.correlate(live_xss, _LABELS) == "B-sqli"
+    unknown = _report(40000, "/totally-unrelated", "1.1.1.1", "a", "t", "s")
+    assert score_phase1.correlate(unknown, _LABELS) is None
+
+
 def test_severity_ok_floor() -> None:
     assert score_phase1.severity_ok({"decision": {"severity": "critical"}}, "high")
     assert not score_phase1.severity_ok({"decision": {"severity": "medium"}}, "high")

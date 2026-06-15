@@ -42,19 +42,32 @@ def load_jsonl(path: pathlib.Path) -> list[dict[str, Any]]:
 
 
 def correlate(report: dict[str, Any], labels: dict[str, dict[str, Any]]) -> str | None:
-    """Match a captured report to a corpus id by rule_id, disambiguated by URL."""
+    """Match a captured report to a corpus id by rule_id, then by endpoint.
+
+    The endpoint fallback matters live: a real target fires different rule ids than
+    the synthetic corpus (e.g. XSS -> 31106, not 31154), so a URL match is the
+    reliable cross-reference.
+    """
     src = report.get("source_log", {})
     rule_id = src.get("rule_id")
     full_log = src.get("full_log", "") or ""
+
     candidates = [cid for cid, lab in labels.items() if lab.get("expected_rule_id") == rule_id]
-    if len(candidates) <= 1:
-        return candidates[0] if candidates else None
-    # Multiple labels share the rule id (e.g. 31103) — disambiguate by endpoint.
-    for cid in candidates:
-        url = labels[cid].get("expected_url")
+    if len(candidates) == 1:
+        return candidates[0]
+    if candidates:  # several labels share the rule id — disambiguate by endpoint
+        for cid in candidates:
+            url = labels[cid].get("expected_url")
+            if url and url in full_log:
+                return cid
+        return candidates[0]
+
+    # No rule-id match (live rule differs from the corpus) — fall back to endpoint.
+    for cid, lab in labels.items():
+        url = lab.get("expected_url")
         if url and url in full_log:
             return cid
-    return candidates[0]
+    return None
 
 
 def severity_ok(report: dict[str, Any], floor: str | None) -> bool:
