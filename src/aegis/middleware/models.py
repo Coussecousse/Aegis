@@ -3,8 +3,8 @@ Pydantic v2 models for the AEGIS pipeline.
 
 Defines strict JSON structures for each pipeline step:
 - WazuhLog: raw input from RabbitMQ (raw Wazuh log)
-- SlmResponse: response from SLM TinyLlama (quick suspicion score)
-- LlmResponse: response from LLM Mistral 7B (detailed report)
+- SlmResponse: response from the triage SLM (Qwen 2.5 1.5B, quick suspicion score)
+- LlmResponse: response from the report LLM (Ollama, detailed report)
 - RagContext: enriched business context from ChromaDB
 - RiskScore: composite danger score calculation
 - AegisReport: complete final report sent to Shuffle SOAR
@@ -63,7 +63,7 @@ class WazuhLog(BaseModel):
 
 
 class SlmResponse(BaseModel):
-    """Response from SLM TinyLlama: quick suspicion analysis."""
+    """Response from the triage SLM (Qwen 2.5 1.5B): quick suspicion analysis."""
 
     is_suspect: bool = Field(..., description="Is the log suspicious?")
     confidence: float = Field(

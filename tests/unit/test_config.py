@@ -34,7 +34,7 @@ def test_settings_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RABBITMQ_PORT", "5673")
     monkeypatch.setenv("CHROMADB_PORT", "9000")
     monkeypatch.setenv("SUSPICION_THRESHOLD", "0.7")
-    monkeypatch.setenv("SLM_MODEL", "qwen25-llm-aegis")
+    monkeypatch.setenv("SLM_MODEL", "slm-custom")
     monkeypatch.setenv("LLM_MODEL", "mistral-custom")
     monkeypatch.setenv("LLM_USE_SCHEMA", "true")
 
@@ -44,7 +44,7 @@ def test_settings_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.rabbitmq.port == 5673
     assert settings.chroma.port == 9000
     assert settings.suspicion_threshold == 0.7
-    assert settings.ollama.slm_model == "qwen25-llm-aegis"
+    assert settings.ollama.slm_model == "slm-custom"
     assert settings.ollama.llm_model == "mistral-custom"
     assert settings.ollama.use_schema is True
 
