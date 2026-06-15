@@ -38,6 +38,10 @@ class _FakeChroma:
         _ = asset_identifier
         return self.context
 
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        _ = (asset_identifier, now)
+        return self.context
+
 
 def _ctx(*, tier: str, has_baseline: bool, anomaly: float) -> RagContext:
     return RagContext(
@@ -77,9 +81,12 @@ _ANOMALOUS_T2 = _ctx(tier="tier2", has_baseline=True, anomaly=0.5)
 _NORMAL_T0 = _ctx(tier="tier0", has_baseline=True, anomaly=0.0)
 
 # (case, level, suspect, confidence, ctx, expected_outcome)
+# The FP gate only suppresses a WEAK suspicion (confidence < 0.6 ceiling) on a calm,
+# profiled, non-critical asset at low rule level — a confident suspicion always escalates.
 _CASES = [
     ("unprofiled_lowsev_suspect", 7, True, 0.85, _UNPROFILED, "escalate"),
-    ("profiled_normal_lowsev", 7, True, 0.85, _NORMAL_T2, "discard"),
+    ("profiled_normal_lowsev_weak", 7, True, 0.55, _NORMAL_T2, "discard"),
+    ("profiled_normal_lowsev_confident", 7, True, 0.85, _NORMAL_T2, "escalate"),
     ("profiled_normal_highsev", 10, True, 0.85, _NORMAL_T2, "escalate"),
     ("profiled_anomalous_lowsev", 7, True, 0.85, _ANOMALOUS_T2, "escalate"),
     ("tier0_normal_lowsev", 7, True, 0.85, _NORMAL_T0, "escalate"),

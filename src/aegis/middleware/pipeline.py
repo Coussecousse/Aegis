@@ -39,7 +39,6 @@ from aegis.middleware.models import (
     SlmResponse,
     WazuhLog,
 )
-from aegis.middleware.playbooks import render_playbook_action
 from aegis.middleware.prompt_builder import (
     build_llm_prompt,
     build_slm_prompt,
@@ -66,6 +65,7 @@ async def triage_log(
     slm_timeout: float = 10.0,
     slm_model: str = _DEFAULT_SLM_MODEL,
     on_unprofiled_asset: Callable[[str], Awaitable[None]] | None = None,
+    fp_gate_confidence_ceiling: float = 0.6,
 ) -> EscalatedAlert | None:
     """
     Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
@@ -86,6 +86,10 @@ async def triage_log(
         metrics: Optional metrics collector for Prometheus reporting.
         suspicion_threshold: Minimum confidence to proceed past SLM (default: 0.5).
         slm_timeout: SLM request timeout in seconds (default: 10).
+        fp_gate_confidence_ceiling: The UEBA false-positive gate never suppresses an
+            alert whose SLM confidence is at or above this (default: 0.6). A confident
+            SLM suspicion plus a fired Wazuh rule are two agreeing signals that a calm
+            asset baseline must not silently veto.
 
     Returns:
         EscalatedAlert: Bundle to publish for analysis, or None if the alert
@@ -215,7 +219,11 @@ async def triage_log(
             )
         )
 
-        rag = await chromadb_client.get_asset_context(log.source_ip)
+        # record_activity also updates the asset's behavioral anomaly score (Gap 2):
+        # each alert is one activity event, scored against the asset's own baseline.
+        # Use the alert's own timestamp (when the activity happened) rather than the
+        # triage time, so a real burst is not flattened by serial processing lag.
+        rag = await chromadb_client.record_activity(log.source_ip, now=log.timestamp.timestamp())
 
         logger.info(
             json.dumps(
@@ -261,17 +269,20 @@ async def triage_log(
     # ========================================================================
     # STEP 3b: UEBA false-positive gate
     # Discard only when a real behavioural baseline confirms this is normal
-    # (low anomaly), the rule is low severity, and the asset is not critical
-    # infrastructure. Without a baseline (has_baseline=False), anomaly_score=0.0
-    # means "unknown", not "normal" — failing open here keeps a suspect alert on
-    # an unprofiled asset (the common case before the asset registry is seeded)
-    # from being silently dropped before it ever reaches the LLM.
+    # (low anomaly), the rule is low severity, the asset is not critical
+    # infrastructure, AND the SLM was only weakly suspicious. A confident SLM
+    # suspicion (>= fp_gate_confidence_ceiling) means the model and a fired Wazuh
+    # rule agree it is an attack — a calm asset baseline must not silently veto
+    # that (otherwise a level-7 SQLi on a "quiet" profiled asset is dropped before
+    # the LLM ever sees it). Without a baseline (has_baseline=False),
+    # anomaly_score=0.0 means "unknown", not "normal", so the gate fails open.
     # ========================================================================
     if (
         rag.ueba.has_baseline
         and rag.ueba.anomaly_score < 0.15
         and log.rule_level <= 8
         and rag.asset_criticality != "tier0"
+        and slm.confidence < fp_gate_confidence_ceiling
     ):
         if metrics is not None:
             metrics.record_triage(time.perf_counter() - total_perf_start)
@@ -288,6 +299,7 @@ async def triage_log(
                     "ueba_anomaly_score": rag.ueba.anomaly_score,
                     "rule_level": log.rule_level,
                     "asset_criticality": rag.asset_criticality,
+                    "slm_confidence": slm.confidence,
                 }
             )
         )
@@ -474,7 +486,7 @@ async def analyze_log(
     # STEP 6: Decision - Determine severity and action
     # ========================================================================
 
-    # Severity mapping: danger_score → severity
+    # Severity mapping: danger_score → severity (the composite risk floor).
     severity: Literal["critical", "high", "medium", "low"]
     if risk_score.danger_score >= 0.8:
         severity = "critical"
@@ -484,6 +496,14 @@ async def analyze_log(
         severity = "medium"
     else:
         severity = "low"
+
+    # A CONFIRMED attack may raise (never lower) the composite severity: the LLM
+    # analysed the alert and assigned its own severity, so a confirmed SQLi/XSS is
+    # not filed as "medium" just because the host is calm and non-critical. The
+    # composite stays the floor; the human gate still applies regardless.
+    _rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    if llm is not None and llm.attack_confirmed and _rank.get(llm.severity, 0) > _rank[severity]:
+        severity = llm.severity
 
     # CONSTRAINT: In v0.2, human-in-the-loop is mandatory
     # Zero automatic remediation (auto_remediation_allowed = False)
@@ -501,18 +521,14 @@ async def analyze_log(
         requires_human = True
         auto_remediation = False
     else:
+        # The LLM owns the remediation: it has the alert, asset and UEBA context and is
+        # expected to name the attacker IP, the endpoint and a concrete step itself. No
+        # deterministic playbook override — a sovereign local model must reason about the
+        # action, not read it from a hardcoded template.
         recommended_action = llm.recommended_action
         requires_human = llm.requires_human_validation
         # Even if LLM says no human needed, v0.2 always requires it
         requires_human = True
-
-    # For known attack classes, override the free-form action with a vetted,
-    # field-substituted playbook step — deterministic and auditable, where the
-    # LLM tends to copy examples or hallucinate (e.g. "disable the account" on
-    # a SQL injection). The LLM keeps ownership of the narrative summary.
-    playbook_action = render_playbook_action(log)
-    if playbook_action is not None:
-        recommended_action = playbook_action
 
     decision = Decision(
         severity=severity,

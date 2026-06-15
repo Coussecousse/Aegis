@@ -54,6 +54,7 @@ class TriageProcessor:
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
         slm_model: str = "qwen25-aegis",
+        fp_gate_confidence_ceiling: float = 0.6,
     ) -> None:
         self.ollama_base_url = ollama_base_url
         self.chromadb_host = chromadb_host
@@ -62,6 +63,7 @@ class TriageProcessor:
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
         self.slm_model = slm_model
+        self.fp_gate_confidence_ceiling = fp_gate_confidence_ceiling
 
         self._stack: AsyncExitStack | None = None
         self._ollama: OllamaClient | None = None
@@ -122,6 +124,7 @@ class TriageProcessor:
             slm_timeout=self.slm_timeout,
             slm_model=self.slm_model,
             on_unprofiled_asset=_request_identity_sync,
+            fp_gate_confidence_ceiling=self.fp_gate_confidence_ceiling,
         )
 
         if escalated is not None:
@@ -153,6 +156,7 @@ def build_triage_consumer(
         suspicion_threshold=settings.suspicion_threshold,
         slm_timeout=settings.ollama.slm_timeout,
         slm_model=settings.ollama.slm_model,
+        fp_gate_confidence_ceiling=settings.fp_gate_confidence_ceiling,
     )
     return MessageConsumer(
         amqp_url=rmq.amqp_url,

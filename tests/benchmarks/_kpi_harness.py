@@ -2,9 +2,9 @@
 
 The pipeline is driven with a fake Ollama that replays *canonical* responses
 (what a correct model should say), so these KPIs measure the deterministic
-behaviour around the model — parse correctness, the playbook action specificity,
-severity calibration and gate outcomes — not the live model's accuracy (that is
-the Level-2 live harness).
+behaviour around the model — parse correctness, action specificity, severity
+calibration and gate outcomes — not the live model's accuracy (that is the
+Level-2 live harness).
 """
 
 from __future__ import annotations
@@ -16,8 +16,24 @@ from typing import Any
 from aegis.collectors.wazuh_forwarder import WazuhAlertParser
 from aegis.middleware.models import AegisReport, RagContext, UEBAMetrics, WazuhLog
 from aegis.middleware.pipeline import analyze_log, triage_log
+from aegis.middleware.prompt_builder import extract_request_path
 
 CORPUS_DIR = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "corpus"
+
+
+def _canonical_action(log: WazuhLog) -> str:
+    """The action a correct LLM should author: names the real actor, host and endpoint.
+
+    Since the deterministic playbook was removed, the model owns the action — so the
+    canonical response must itself cite the specifics (no template injects them).
+    """
+    actor = log.attacker_ip or log.source_ip
+    path = extract_request_path(log.full_log)
+    action = f"Block {actor} at the firewall and isolate {log.source_agent}"
+    if path:
+        action += f"; audit {path} for the attack pattern"
+    return action + "."
+
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
@@ -58,8 +74,9 @@ def unprofiled_context(asset: str) -> RagContext:
 class FakeOllama:
     """Replays canonical SLM/LLM responses (model name 'slm' vs 'llm')."""
 
-    def __init__(self, *, is_attack: bool) -> None:
+    def __init__(self, *, is_attack: bool, log: WazuhLog | None = None) -> None:
         self.is_attack = is_attack
+        self.log = log
         self.calls: list[str] = []
 
     async def __aenter__(self) -> FakeOllama:
@@ -95,7 +112,9 @@ class FakeOllama:
             "affected_asset": "asset",
             "asset_criticality": "tier2",
             "plain_language_summary": "Canonical summary of the observed activity.",
-            "recommended_action": "Investigate further.",
+            "recommended_action": (
+                _canonical_action(self.log) if self.log is not None else "Investigate further."
+            ),
             "requires_human_validation": True,
             "raw_probabilities": {"attack": 0.9, "false_positive": 0.1},
         }
@@ -109,6 +128,10 @@ class _FakeChroma:
         return None
 
     async def get_asset_context(self, asset_identifier: str) -> RagContext:
+        return unprofiled_context(asset_identifier)
+
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        _ = now
         return unprofiled_context(asset_identifier)
 
 
@@ -138,7 +161,7 @@ async def run_canonical(
     if parsed is None:
         return None, None
 
-    ollama = FakeOllama(is_attack=is_attack)
+    ollama = FakeOllama(is_attack=is_attack, log=parsed)
     escalated = await triage_log(
         log=parsed,
         ollama_client=ollama,  # type: ignore[arg-type]

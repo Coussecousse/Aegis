@@ -8,21 +8,32 @@ the raw data needed for analysis, nothing else.
 Principle: Small models have limited context windows. Keep prompts minimal.
 """
 
+import re
+
 from aegis.middleware.models import RagContext, SlmResponse, WazuhLog
+
+# First request path in a combined-format access log line: "GET /path?q=.. HTTP/1.1"
+_REQUEST_PATH_RE = re.compile(r'"(?:GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\s+(\S+)\s+HTTP')
+
+
+def extract_request_path(full_log: str) -> str | None:
+    """Return the first HTTP request path in a combined-format access log line, if any."""
+    match = _REQUEST_PATH_RE.search(full_log)
+    return match.group(1) if match else None
 
 
 def build_slm_prompt(log: WazuhLog) -> str:
     """
-    Build data-only prompt for SLM (TinyLlama).
+    Build data-only prompt for the triage SLM (Qwen 2.5 1.5B).
 
     Contains only the Wazuh log fields relevant to suspicion scoring.
-    Role, JSON format, and constraints are defined in Modelfile.slm-tinyllama.
+    Role, JSON format, and constraints are defined in Modelfile.slm-qwen25.
 
     Args:
         log: Raw Wazuh alert log to analyze.
 
     Returns:
-        str: Minimal data prompt for TinyLlama inference.
+        str: Minimal data prompt for SLM inference.
     """
     full_log_truncated = log.full_log[:300]
     return (
@@ -39,10 +50,10 @@ def build_slm_prompt(log: WazuhLog) -> str:
 
 def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
     """
-    Build data-only prompt for LLM (Mistral 7B).
+    Build data-only prompt for the report LLM (Ollama, e.g. mistral-aegis).
 
     Contains the Wazuh log + SLM quick analysis + RAG asset context (UEBA).
-    Role, JSON format, and report structure are defined in Modelfile.llm-mistral.
+    Role, JSON format, and report structure are defined in the LLM Modelfile.
 
     Args:
         log: Original Wazuh alert log.
@@ -73,6 +84,7 @@ def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
     # counteracts that recency bias.
     # Name the real actor explicitly: source_ip is the targeted host, attacker_ip (when
     # present) is the remote client — without this the model cites the host, not the attacker.
+    actor = log.attacker_ip or log.source_ip
     if log.attacker_ip:
         actor_line = (
             f"Attacker: {log.attacker_ip} -> "
@@ -81,11 +93,17 @@ def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
     else:
         actor_line = f"Machine: {log.source_agent} ({log.source_ip})\n"
 
+    # Pre-extract the exact endpoint so the model reuses it verbatim in the action
+    # instead of paraphrasing ("the affected endpoint") or omitting it.
+    endpoint = extract_request_path(log.full_log)
+    endpoint_line = f"Endpoint: {endpoint}\n" if endpoint else ""
+
     return (
         f"--- ALERT ---\n"
         f"Rule: {log.rule_id} | Level: {log.rule_level}/15\n"
         f"Description: {log.rule_description}\n"
         f"{actor_line}"
+        f"{endpoint_line}"
         f"MITRE: {log.mitre_technique or 'N/A'}\n"
         f"Log: {full_log_truncated}\n"
         f"\n"
@@ -108,5 +126,12 @@ def build_llm_prompt(log: WazuhLog, slm: SlmResponse, rag: RagContext) -> str:
         f"your instructions):\n"
         f"attack_confirmed, confidence, attack_type, severity, affected_asset, "
         f"asset_criticality, plain_language_summary, recommended_action, "
-        f"requires_human_validation, raw_probabilities."
+        f"requires_human_validation, raw_probabilities.\n"
+        f"recommended_action: a concrete remediation that explicitly names the attacker "
+        f"IP {actor} and the exact endpoint/path from the Log, followed by ONE concrete "
+        f"step (e.g. block at firewall, disable account, patch the component). Write the "
+        f"literal IP and path, not 'the IP address' or 'the endpoint'. Banned: "
+        f"'investigate further', 'monitor', 'remediate the vulnerability', generic advice.\n"
+        f"plain_language_summary: 2-3 sentences that name the attacker IP {actor} and what "
+        f"it targeted, and why it matters."
     )

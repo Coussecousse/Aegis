@@ -35,6 +35,10 @@ class _MemoryChromaDBClient:
     async def get_asset_context(self, asset_identifier: str) -> RagContext:
         return self._contexts[asset_identifier]
 
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        _ = now
+        return self._contexts[asset_identifier]
+
 
 class _FakeOllamaClient:
     def __init__(self) -> None:

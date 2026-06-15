@@ -45,6 +45,10 @@ class _FakeChromaDBClient:
         _ = asset_identifier
         return self.context
 
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        _ = (asset_identifier, now)
+        return self.context
+
 
 class _FakeShuffleClient:
     def __init__(self, should_fail: bool = False) -> None:
@@ -195,6 +199,21 @@ def _suspect_ollama() -> _FakeOllamaClient:
     )
 
 
+def _weak_suspect_ollama() -> _FakeOllamaClient:
+    """SLM is suspect but weakly so (confidence below the FP-gate ceiling)."""
+    return _FakeOllamaClient(
+        responses={
+            "qwen25-aegis": {
+                "is_suspect": True,
+                "confidence": 0.55,
+                "behavior_category": "normal",
+                "reasoning_short": "Mildly unusual request pattern",
+                "raw_probabilities": {"suspect": 0.55, "benign": 0.45},
+            },
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_pipeline_no_baseline_suspect_escalates_to_llm() -> None:
     # Unprofiled asset (has_baseline=False): a low-severity but SLM-suspect alert
@@ -211,10 +230,11 @@ async def test_pipeline_no_baseline_suspect_escalates_to_llm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pipeline_baseline_normal_discards_before_llm() -> None:
-    # A real baseline that says "normal" (low anomaly) still gates out a
-    # low-severity alert on a non-critical asset — the LLM is never called.
-    ollama = _suspect_ollama()
+async def test_pipeline_baseline_normal_discards_weak_suspect_before_llm() -> None:
+    # A real baseline that says "normal" (low anomaly) gates out a low-severity
+    # alert on a non-critical asset ONLY when the SLM was weakly suspicious
+    # (confidence below the gate ceiling) — the LLM is never called.
+    ollama = _weak_suspect_ollama()
     chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=True))
     shuffle = _FakeShuffleClient()
 
@@ -223,6 +243,21 @@ async def test_pipeline_baseline_normal_discards_before_llm() -> None:
     assert result is None
     assert ollama.calls == ["qwen25-aegis"]
     assert shuffle.reports_sent == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_baseline_normal_but_confident_slm_escalates() -> None:
+    # The hardening: a calm profiled baseline must NOT silence a CONFIDENT SLM
+    # suspicion (>= ceiling). The agreeing rule + model signal wins the gate.
+    ollama = _suspect_ollama()  # SLM confidence 0.85, above the 0.6 ceiling
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=True))
+    shuffle = _FakeShuffleClient()
+
+    result = await _run_pipeline(_make_log(rule_level=7), ollama, chroma, shuffle)
+
+    assert result is not None
+    assert ollama.calls == ["qwen25-aegis", "mistral-aegis"]
+    assert shuffle.reports_sent == 1
 
 
 @pytest.mark.asyncio
@@ -263,9 +298,9 @@ async def test_triage_no_identity_sync_when_profiled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pipeline_known_rule_uses_playbook_action() -> None:
-    # For a known rule (31103 SQLi) the recommended_action must come from the
-    # deterministic playbook (attacker IP + endpoint), not the LLM's free text.
+async def test_pipeline_uses_llm_authored_action_verbatim() -> None:
+    # The LLM owns recommended_action — no deterministic playbook override. The
+    # decision action must be exactly what the LLM produced.
     ollama = _suspect_ollama()
     chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=False))
     shuffle = _FakeShuffleClient()
@@ -279,9 +314,8 @@ async def test_pipeline_known_rule_uses_playbook_action() -> None:
     result = await _run_pipeline(log, ollama, chroma, shuffle)
 
     assert result is not None
-    assert result.decision.recommended_action != "Block the source IP at the firewall."
-    assert "172.18.0.1" in result.decision.recommended_action
-    assert "/rest/products/search?q=x" in result.decision.recommended_action
+    # _suspect_ollama's LLM action, passed through untouched.
+    assert result.decision.recommended_action == "Block the source IP at the firewall."
 
 
 @pytest.mark.asyncio
