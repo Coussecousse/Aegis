@@ -1,166 +1,164 @@
-# Banc de KPI / benchmarks AEGIS
+# AEGIS KPI / Benchmark Guide
 
-Ce document explique **ce qu'on mesure sur AEGIS, pourquoi, comment c'est calculé,
-et les objectifs à atteindre**. Objectif : savoir à quoi s'attendre (qualité des
-rapports, temps de réponse, taux de faux positifs…) de façon reproductible.
-
----
-
-## 1. Vocabulaire (à lire en premier)
-
-- **Alerte** : un événement détecté par Wazuh (ex. « tentative d'injection SQL »).
-- **Triage (étage rapide, modèle SLM)** : pour chaque alerte, un petit modèle décide
-  vite s'il faut **jeter** (bruit) ou **approfondir**.
-- **Escalade** : quand le triage décide d'approfondir une alerte.
-- **Analyse (étage lent, modèle LLM)** : un gros modèle rédige le **rapport** détaillé
-  (type d'attaque, résumé, action recommandée) — c'est lent (minutes) sur le Raspberry Pi.
-- **Rapport** : le résultat final, validé ensuite par un humain.
-- **p50 / p95** : façons de résumer des durées. p50 = la médiane (la moitié des alertes
-  vont plus vite). p95 = le « presque pire cas » (95 % vont plus vite ; on ignore les 5 %
-  extrêmes). On vise des objectifs sur le **p95** car c'est ce que vit l'utilisateur dans
-  les mauvais moments.
+What we measure on AEGIS, **why, how each number is computed, and the target to
+hit** — so we know what to expect (report quality, response time, false-positive
+rate…) in a reproducible way.
 
 ---
 
-## 2. Quels tests sont faits ?
+## 1. Vocabulary (read this first)
 
-Deux familles, lancées par deux commandes.
-
-### Niveau 1 — tests automatiques rapides (`make benchmark-ci`)
-Tournent sur un PC normal, **sans le Raspberry Pi**, en quelques secondes. On rejoue un
-**corpus d'alertes étiquetées** (on connaît la bonne réponse à l'avance) en simulant les
-modèles, pour vérifier le comportement **déterministe** :
-- les rapports contiennent bien tous les champs et une **action concrète** (la vraie IP /
-  le vrai endpoint) ;
-- la **sévérité** attribuée est cohérente ;
-- la **porte UEBA** (qui décide jeter/approfondir) prend les bonnes décisions ;
-- le **taux de faux positifs** (voir §3) ;
-- le **connecteur identité** (LDAP→base) marche, même quand le LDAP tombe.
-
-### Niveau 2 — test réel sur la stack + le Pi (`make benchmark`)
-Lance de **vraies attaques** (curl + outils Kali) contre la cible, puis mesure les
-**temps réels** (triage, analyse LLM), le **débit**, et la qualité des rapports produits
-par le vrai modèle. C'est là qu'on obtient les vrais temps de réponse.
+- **Alert** — an event Wazuh detects (e.g. "SQL injection attempt").
+- **Triage (fast stage, SLM model)** — for each alert, a small model quickly decides
+  whether to **drop** it (noise) or **escalate** it (worth a closer look).
+- **Escalation** — when triage decides an alert is worth analyzing.
+- **Analysis (slow stage, LLM model)** — a larger model writes the detailed **report**
+  (attack type, summary, recommended action). Slow (minutes) on the Raspberry Pi.
+- **Report** — the final output, then validated by a human.
+- **p50 / p95** — ways to summarize a set of durations. p50 = the median (half the alerts
+  are faster). p95 = the "near-worst case" (95 % are faster; ignores the worst 5 %). We set
+  targets on **p95** because that is what the user feels on bad runs.
 
 ---
 
-## 3. Les KPI : définition, calcul, objectif
+## 2. What the tests actually do
 
-Pour chaque KPI : **ce que c'est → comment on le calcule → l'objectif (et pourquoi)**.
+Two families, two commands.
 
-### Taux de faux positifs — ≤ 5 %
-- **Définition** : un faux positif = une alerte qui **n'est pas une vraie attaque** mais
-  qu'AEGIS approfondit quand même jusqu'à produire un rapport. Exemple concret : sur
-  l'hôte qui héberge AEGIS, « netstat : un port a changé » (règle 533) est une activité
-  **normale**, pas une attaque — si AEGIS en fait un rapport, c'est un faux positif.
-- **Comment on le calcule** : on rejoue un lot d'alertes **bénignes connues** (étiquetées
-  « pas une attaque » dans le corpus). Puis :
+### Level 1 — fast automated checks (`make benchmark-ci`)
+Run on a normal PC, **without the Raspberry Pi**, in seconds. They replay a **labeled
+alert corpus** (we already know the right answer) with the models faked, to check the
+**deterministic** behaviour:
+- reports carry all fields and a **concrete action** (the real IP / endpoint);
+- the assigned **severity** is consistent;
+- the **UEBA gate** (drop vs escalate) makes the right calls;
+- the **false-positive rate** (see §3);
+- the **identity connector** (LDAP→DB) works, even when LDAP is down.
 
-  `taux de FP = (alertes bénignes escaladées en rapport) ÷ (total des alertes bénignes)`
-
-- **Objectif : ≤ 5 %.** Pourquoi : chaque faux positif consomme **un cycle LLM de 5-9 min**
-  sur le Pi et noie le vrai signal. On en tolère un peu, pas beaucoup.
-- **Mesuré aujourd'hui** : **0 %** quand le filtre de bruit est activé
-  (`WAZUH_EXCLUDED_RULES=533`), **33 %** sans le filtre (l'alerte netstat passe). Ça
-  chiffre l'utilité du filtre.
-
-### Rappel d'attaque (ne rien rater) — ≥ 95 % (viser 100 %)
-- **Définition** : la proportion de **vraies attaques** qui sont bien approfondies.
-- **Calcul** : `(vraies attaques escaladées) ÷ (total des vraies attaques du corpus)`.
-- **Objectif ≥ 95 %.** Pourquoi : rater une attaque est la pire défaillance pour un SOC.
-
-### Temps de réponse — triage et analyse
-- **MTTT (temps de triage), p95 < 90 s.** Temps que met l'étage rapide à décider
-  jeter/approfondir. Calcul : on enregistre la durée de chaque triage, on lit le p95.
-  Pourquoi 90 s : le triage doit rester quasi temps réel pour ne pas accumuler de retard.
-- **Temps d'analyse LLM, p95 < 600 s (idéal < 420 s).** Temps pour rédiger un rapport.
-  Lent car le Pi calcule sur CPU. Pourquoi 600 s : c'est le budget configuré
-  (`LLM_TIMEOUT`) ; au-delà l'analyse est abandonnée.
-- **Bout-en-bout (alerte → rapport), p95 < ~10 min.** Acceptable pour un rapport relu
-  par un humain sur ce matériel.
-
-### Débit sous charge (rafale d'attaques)
-- **File de triage ≈ 0 pendant une rafale.** Calcul : pic du nombre de messages en attente
-  dans `aegis.triage`. Pourquoi : prouve que le triage absorbe le flux sans accumuler.
-- **Perte d'alertes = 0.** Calcul : alertes envoyées vs alertes effectivement traitées.
-  Pourquoi : perdre une alerte sous charge est inacceptable pour un SOC.
-
-### Qualité des rapports
-- **Rapport en JSON valide = 100 %** : un rapport mal formé est inexploitable (il retombe
-  sur une analyse dégradée). Calcul : rapports valides ÷ rapports produits.
-- **Champs complets = 100 %** : les 10 champs attendus sont présents.
-- **Action concrète = 100 % (sur règles connues)** : l'action recommandée cite la **vraie
-  IP / le vrai endpoint** (ex. « Bloquer 172.20.0.1 au pare-feu ; auditer
-  /rest/products/search »), pas un conseil générique.
-- **Sévérité ≥ « high » pour une attaque confirmée** : une attaque confirmée ne doit pas
-  être minimisée en « medium ».
-
-### Robustesse / contraintes
-- **Livraison SOAR ≥ 99 %** : les rapports atteignent bien le workflow de validation humaine.
-- **CPU de l'agent Wazuh < 5 %** (règle non négociable du projet) : au-delà, risque
-  d'impacter la production industrielle.
+### Level 2 — real run on the stack + Pi (`make benchmark`)
+Fires **real attacks** (curl + Kali tools) at the target, then measures the **real times**
+(triage, LLM analysis), the **throughput**, and the quality of reports produced by the
+real model. This is where the true response times come from.
 
 ---
 
-## 4. Comment lancer les tests
+## 3. The KPIs: definition, how it's computed, target
+
+For each KPI: **what it is → how we compute it → the target (and why)**.
+
+### False-positive rate — ≤ 5 %
+- **What it is** — a false positive is an alert that is **not a real attack** but that
+  AEGIS escalates anyway, all the way to a report. Concrete example: on the host running
+  AEGIS, "netstat: a port changed" (rule 533) is **normal** activity, not an attack — if
+  AEGIS writes a report for it, that's a false positive.
+- **How it's computed** — we replay a set of **known-benign alerts** (labeled "not an
+  attack" in the corpus), then:
+
+  `FP rate = (benign alerts escalated to a report) ÷ (total benign alerts)`
+
+- **Target: ≤ 5 %.** Why: each false positive burns **one 5–9 min LLM cycle** on the Pi
+  and drowns the real signal. A little is tolerable, a lot is not.
+- **Measured today** — **0 %** with the noise filter on (`WAZUH_EXCLUDED_RULES=533`),
+  **33 %** without it (the netstat alert slips through). That quantifies the filter.
+
+### Attack recall (miss nothing) — ≥ 95 % (aim for 100 %)
+- **What it is** — the share of **real attacks** that get escalated.
+- **How** — `(real attacks escalated) ÷ (total real attacks in the corpus)`.
+- **Target ≥ 95 %.** Why: missing a real attack is the worst failure for a SOC.
+
+### Response time — triage and analysis
+- **MTTT (triage time), p95 < 90 s.** Time the fast stage takes to decide drop/escalate.
+  Computed by recording each triage duration and reading the p95. Why 90 s: triage must
+  stay near real-time so no backlog builds up.
+- **LLM analysis time, p95 < 600 s (ideally < 420 s).** Time to write a report. Slow
+  because the Pi runs on CPU. Why 600 s: that's the configured budget (`LLM_TIMEOUT`);
+  beyond it the analysis is abandoned.
+- **End-to-end (alert → report), p95 < ~10 min.** Acceptable for a human-validated report
+  on this hardware.
+
+### Throughput under load (attack burst)
+- **Triage queue ≈ 0 during a burst.** Computed as the peak number of messages waiting in
+  `aegis.triage`. Why: proves triage absorbs the flux without piling up.
+- **Alert loss = 0.** Computed as alerts sent vs alerts actually processed. Why: losing an
+  alert under load is unacceptable for a SOC.
+
+### Report quality
+- **Valid JSON report = 100 %** — a malformed report is unusable (it falls back to a
+  degraded analysis). Computed as valid ÷ produced.
+- **Field completeness = 100 %** — the 10 expected fields are present.
+- **Concrete action = 100 % (on known rules)** — the recommended action names the **real
+  IP / endpoint** (e.g. "Block 172.20.0.1 at the firewall; audit /rest/products/search"),
+  not generic advice.
+- **Severity ≥ "high" for a confirmed attack** — a confirmed attack must not be downgraded
+  to "medium".
+
+### Robustness / constraints
+- **SOAR delivery ≥ 99 %** — reports reach the human-validation workflow.
+- **Wazuh agent CPU < 5 %** (project's non-negotiable rule) — above it, risk of impacting
+  industrial production.
+
+---
+
+## 4. How to run the tests
 
 ```bash
-# Niveau 1 — rapide, sans Pi. Écrit docs/benchmarks/kpi-ci-latest.json
+# Level 1 — fast, no Pi. Writes docs/benchmarks/kpi-ci-latest.json
 make benchmark-ci
 
-# Niveau 2 — réel (stack + Pi allumés). Écrit docs/benchmarks/report-<date>.md
+# Level 2 — real (stack + Pi up). Writes docs/benchmarks/report-<date>.md
 make benchmark SCENARIO=all INTENSITY=standard
-#   INTENSITY=smoke    → quelques alertes (test rapide)
-#   INTENSITY=standard → dizaines d'alertes
-#   INTENSITY=soak     → centaines, en parallèle (test de charge "beaucoup de logs")
+#   INTENSITY=smoke    -> a few alerts (quick check)
+#   INTENSITY=standard -> dozens of alerts
+#   INTENSITY=soak     -> hundreds, in parallel (the "lots of logs" load test)
 
-# Variante manuelle en deux temps :
-python -m scripts.benchmark.run_attack_suite --scenario B --intensity smoke   # attaque
-python -m scripts.benchmark.collect_kpis --since <T0> --until <T1>            # mesure
+# Manual two-step variant:
+python -m scripts.benchmark.run_attack_suite --scenario B --intensity smoke   # attack
+python -m scripts.benchmark.collect_kpis --since <T0> --until <T1>            # measure
 ```
 
-Les scénarios d'attaque (A recon, B SQLi, C XSS, D path-traversal, E command-injection,
-F brute-force, …) sont définis une seule fois dans `scripts/benchmark/scenarios.py`. Les
-règles à forte valeur impossibles à déclencher depuis Kali (compte AD, ransomware, C2…)
-sont couvertes par le corpus étiqueté du Niveau 1.
+Attack scenarios (A recon, B SQLi, C XSS, D path-traversal, E command-injection,
+F brute-force, …) are defined once in `scripts/benchmark/scenarios.py`. High-value rules
+that can't be triggered from Kali (AD account, ransomware, C2…) are covered by the Level-1
+labeled corpus.
 
 ---
 
-## 5. Résultats actuels
+## 5. Current results
 
-### Niveau 1 (dernier `make benchmark-ci`) — tout dans les clous
-| KPI | Résultat | Objectif | Statut |
+### Level 1 (latest `make benchmark-ci`) — all within target
+| KPI | Result | Target | Status |
 |---|---|---|---|
-| Rappel d'attaque | 12/12 (100 %) | ≥ 95 % | ✅ |
-| Rapport JSON valide | 12/12 | 100 % | ✅ |
-| Action concrète | 12/12 | 100 % | ✅ |
-| Sévérité cohérente | 12/12 | ≥ high si confirmée | ✅ |
-| Porte UEBA (décisions) | 6/6 | 100 % | ✅ |
-| Taux de faux positifs (filtre ON) | 0 % | ≤ 5 % | ✅ |
-| Taux de faux positifs (filtre OFF) | 33 % | — | ⚠️ montre l'utilité du filtre |
-| Connecteur identité | OK | OK | ✅ |
+| Attack recall | 12/12 (100 %) | ≥ 95 % | ✅ |
+| Valid JSON report | 12/12 | 100 % | ✅ |
+| Concrete action | 12/12 | 100 % | ✅ |
+| Severity consistent | 12/12 | ≥ high if confirmed | ✅ |
+| UEBA gate decisions | 6/6 | 100 % | ✅ |
+| False-positive rate (filter ON) | 0 % | ≤ 5 % | ✅ |
+| False-positive rate (filter OFF) | 33 % | — | ⚠️ shows the filter's value |
+| Identity connector | OK | OK | ✅ |
 
-Snapshot machine : `docs/benchmarks/kpi-ci-latest.json` (régénéré à chaque run, non versionné).
+Machine-readable snapshot: `docs/benchmarks/kpi-ci-latest.json` (regenerated each run,
+git-ignored).
 
-### Niveau 2 (premier échantillon live, 2026-06-15, SQLi, intensité smoke)
-2 alertes escaladées, 1 rapport LLM complet sur le Pi :
+### Level 2 (first live sample, 2026-06-15, SQLi, smoke intensity)
+2 escalated alerts, 1 full LLM report on the Pi:
 
-| KPI | Mesuré | Objectif | Statut |
+| KPI | Measured | Target | Status |
 |---|---|---|---|
-| MTTT triage p50 / p95 | 45 s / 58,5 s | p95 < 90 s | ✅ |
-| Temps analyse LLM p95 | 291 s | < 600 s | ✅ |
-| RAG (lecture contexte) p95 | 0,095 s | < 1 s | ✅ |
-| Livraison SOAR | 100 % | ≥ 99 % | ✅ |
-| Rapport JSON valide | 100 % (1/1) | 100 % | ✅ |
-| Pic file de triage | 2 | ≈ 0 | ⚠️ micro-échantillon (2 alertes quasi simultanées) |
+| MTTT triage p50 / p95 | 45 s / 58.5 s | p95 < 90 s | ✅ |
+| LLM analysis time p95 | 291 s | < 600 s | ✅ |
+| RAG (context lookup) p95 | 0.095 s | < 1 s | ✅ |
+| SOAR delivery | 100 % | ≥ 99 % | ✅ |
+| Valid JSON report | 100 % (1/1) | 100 % | ✅ |
+| Triage queue peak | 2 | ≈ 0 | ⚠️ tiny sample (2 near-simultaneous alerts) |
 
-**Encore à faire** : un vrai run de charge `soak` (valider le débit / zéro perte sous des
-centaines d'alertes), et les KPI **ressources du Pi** (CPU/RAM/température, via
-`node_exporter`) + le **CPU agent Wazuh < 5 %**.
+**Still to do**: a real `soak` load run (validate throughput / zero loss under hundreds of
+alerts), and the **Pi resource KPIs** (CPU/RAM/temperature via `node_exporter`) plus the
+**Wazuh agent CPU < 5 %** check.
 
 ---
 
-## 6. Références
+## 6. References
 
-- Cibles formalisées : [ADR 003](../adr/003-kpi-benchmark-protocol.md).
-- Protocole MTTT avant/après : [ADR 002](../adr/002-mttt-measurement-protocol.md).
+- Targets formalized in [ADR 003](../adr/003-kpi-benchmark-protocol.md).
+- MTTT before/after protocol in [ADR 002](../adr/002-mttt-measurement-protocol.md).
