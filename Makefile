@@ -82,6 +82,15 @@ benchmark-quality-score: ## Phase 1: grade captured reports vs the corpus
 	$(VENV_BIN)/python -m scripts.benchmark.score_phase1 \
 	  --manifest /tmp/aegis-quality-manifest.json --reports /tmp/aegis-reports.jsonl
 
+benchmark-load: ## Phase 2: soak load + zero-loss + resource KPIs (needs stack + Pi)
+	$(VENV_BIN)/python -m scripts.benchmark.run_attack_suite --phase load \
+	  --scenario "$(or $(SCENARIO),all)" --intensity "$(or $(INTENSITY),soak)" \
+	  | tee /tmp/aegis-bench-window.txt
+	@since=$$(grep -o '"t0": "[^"]*"' /tmp/aegis-bench-window.txt | head -1 | cut -d'"' -f4); \
+	until=$$(grep -o '"t1": "[^"]*"' /tmp/aegis-bench-window.txt | head -1 | cut -d'"' -f4); \
+	echo "Waiting 60s for the pipeline to drain before measuring..."; sleep 60; \
+	$(VENV_BIN)/python -m scripts.benchmark.collect_kpis --since "$$since" --until "$$until" --check-loss
+
 security-scan: ## Run bandit + pip-audit
 	$(VENV_BIN)/bandit -r src/ -ll
 	$(VENV_BIN)/pip-audit

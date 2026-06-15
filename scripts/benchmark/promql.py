@@ -38,6 +38,24 @@ def alerts_by_status(window: str) -> str:
     return f"sum(increase(aegis_alerts_processed_total[{window}])) by (status)"
 
 
+# --- Raspberry Pi resources (require node_exporter on the Pi, job-agnostic) ---
+
+
+def pi_cpu_busy_pct(window: str) -> str:
+    """Average CPU busy % across cores over the window (100 - idle%)."""
+    return f'100 - (avg(rate(node_cpu_seconds_total{{mode="idle"}}[{window}])) * 100)'
+
+
+def pi_mem_used_pct() -> str:
+    """Used memory % (1 - available/total)."""
+    return "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100"
+
+
+def pi_temp_celsius() -> str:
+    """Max hwmon/thermal-zone temperature in °C (whichever the Pi exposes)."""
+    return "max(node_hwmon_temp_celsius or node_thermal_zone_temp)"
+
+
 def query_instant(prom_url: str, expr: str, at_iso: str | None = None) -> list[dict[str, Any]]:
     """Run an instant query; returns the Prometheus result vector (possibly empty)."""
     params = {"query": expr}
