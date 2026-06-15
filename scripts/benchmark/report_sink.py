@@ -17,10 +17,8 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import signal
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from types import FrameType
 
 _OUT_PATH = pathlib.Path("/tmp/aegis-reports.jsonl")  # noqa: S108 — overridable via --out
 
@@ -61,15 +59,16 @@ def main() -> int:
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     server = HTTPServer(("0.0.0.0", args.port), _Handler)  # noqa: S104 — reachable from container
-
-    def _stop(_sig: int, _frame: FrameType | None) -> None:
-        print("\nstopping report sink")
-        server.shutdown()
-
-    signal.signal(signal.SIGINT, _stop)
-    signal.signal(signal.SIGTERM, _stop)
     print(f"report sink on :{args.port} → {_OUT_PATH} (Ctrl-C to stop)")
-    server.serve_forever()
+    # serve_forever blocks; Ctrl-C (SIGINT) raises KeyboardInterrupt here. SIGTERM uses the
+    # default disposition (immediate exit) — calling server.shutdown() from this same thread
+    # would deadlock, so we don't install custom handlers.
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopping report sink")
+    finally:
+        server.server_close()
     return 0
 
 
