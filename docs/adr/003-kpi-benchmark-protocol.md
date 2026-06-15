@@ -27,7 +27,16 @@ Adopt a **two-level KPI harness** with a single source of truth, documented in
   (`scripts/benchmark/scenarios.py`, the single source of truth, intensities
   smoke/standard/soak) and `collect_kpis.py` computes latency/throughput/
   semantic KPIs from Prometheus + middleware logs into
-  `docs/benchmarks/report-<ts>.md`.
+  `docs/benchmarks/report-<ts>.md`. Level 2 runs in **two phases**:
+  - **Phase 1 — Quality** (`make benchmark-quality`): replays the labeled attacks,
+    captures the real reports via a sink standing in for the SOAR webhook
+    (`report_sink.py`), and grades them against ground truth (`score_phase1.py`):
+    real recall, real FP rate, severity accuracy, action/summary specificity.
+  - **Phase 2 — Load** (`make benchmark-load`): a soak run measuring throughput,
+    **zero alert loss** (Wazuh alerts vs pipeline entries), latency under load, and
+    Pi resources (node_exporter).
+  Phase-1 targets are **provisional, to calibrate**; KPIs are diagnostic goals, not
+  blocking gates — AEGIS is not expected to meet every target yet.
 
 KPI categories: latency per stage, throughput/backpressure, report quality,
 UEBA & scoring, identity connector, resilience, resources, detection coverage.

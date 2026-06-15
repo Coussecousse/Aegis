@@ -35,10 +35,19 @@ alert corpus** (we already know the right answer) with the models faked, to chec
 - the **false-positive rate** (see §3);
 - the **identity connector** (LDAP→DB) works, even when LDAP is down.
 
-### Level 2 — real run on the stack + Pi (`make benchmark`)
-Fires **real attacks** (curl + Kali tools) at the target, then measures the **real times**
-(triage, LLM analysis), the **throughput**, and the quality of reports produced by the
-real model. This is where the true response times come from.
+### Level 2 — real run on the stack + Pi, in **two phases**
+Fires **real attacks** at the target and measures the **real** behaviour. Split by intent:
+
+- **Phase 1 — Quality** (`make benchmark-quality`): low volume, replays the labeled
+  attacks and **grades the real model's reports** against ground truth — does the Pi
+  detect, escalate (or not), and write a good report? See §6.
+- **Phase 2 — Load** (`make benchmark-load`): a sustained **soak** (hundreds of alerts,
+  parallel) to check **throughput, zero alert loss, latency under load, and Pi
+  resources**. See §6.
+
+> **We accept that AEGIS does not yet meet every target.** The KPIs are diagnostic
+> goals to track progress, **not** blocking gates. Phase-1 targets especially are
+> **provisional — to calibrate** against the real project.
 
 ---
 
@@ -158,7 +167,58 @@ alerts), and the **Pi resource KPIs** (CPU/RAM/temperature via `node_exporter`) 
 
 ---
 
-## 6. References
+## 6. Level 2 in two phases
+
+### Phase 1 — Quality (does the Pi react correctly?)
+
+Replays the labeled attacks for real and **grades the model's actual reports** against
+ground truth. Reports are captured non-invasively: a small sink stands in for the SOAR
+webhook (the pipeline already POSTs the full report there).
+
+```bash
+# 1. start the capture sink (host), reset the capture file
+python -m scripts.benchmark.report_sink --port 8099 --reset --out /tmp/aegis-reports.jsonl
+# 2. point the middleware's SHUFFLE_WEBHOOK_URL at the sink and recreate it, e.g.
+#    SHUFFLE_WEBHOOK_URL=http://host.docker.internal:8099/  (reachable from the container)
+# 3. fire the attacks (writes a manifest)
+make benchmark-quality SCENARIO=all          # INTENSITY=smoke by default
+# 4. WAIT for the Pi to produce reports (5-9 min each), then grade them
+make benchmark-quality-score                 # writes docs/benchmarks/report-quality-<ts>.md
+```
+
+| Phase-1 KPI | How it's computed | Target (provisional) |
+|---|---|---|
+| Real recall | attack scenarios that produced a report ÷ attacks fired | ≥ 90 % |
+| Real false-positive rate | benign that produced a report ÷ benign | ≤ 10 % |
+| Report JSON-valid rate | reports with an LLM analysis ÷ reports | ≥ 95 % |
+| Severity accuracy | `decision.severity` ≥ expected floor | ≥ 80 % |
+| Action specificity | action contains the real attacker IP **and** endpoint | ≥ 80 % |
+| `attack_type` relevance | contains an attack keyword (sql/xss/traversal…) | ≥ 70 % |
+| Summary specificity | summary cites the actor or endpoint | ≥ 60 % |
+
+> Custom rules (100001-100042) can't be fired from Kali against Juice Shop, so their
+> quality stays covered by the Level-1 corpus.
+
+### Phase 2 — Load (does it hold under a storm?)
+
+```bash
+make benchmark-load SCENARIO=all INTENSITY=soak   # soak = hundreds, parallel
+# writes docs/benchmarks/report-<ts>.md with latency + zero-loss + Pi resources
+```
+
+| Phase-2 KPI | How it's computed | Target (provisional) |
+|---|---|---|
+| MTTT triage p95 under load | Prometheus, stays near the no-load value | < 90 s |
+| Alert loss | Wazuh alerts in window (level≥7) − alerts entering the pipeline | 0 |
+| `aegis.triage` peak / drain | queue depth peak; drains after the run | drains |
+| Pi CPU / temperature | node_exporter | < ~90 % / < 80 °C |
+| Wazuh agent CPU | Wazuh API (manual until wired) | < 5 % |
+
+Pi resource KPIs need a `node_exporter` scraped by Prometheus; they read `None` otherwise.
+
+---
+
+## 7. References
 
 - Targets formalized in [ADR 003](../adr/003-kpi-benchmark-protocol.md).
 - MTTT before/after protocol in [ADR 002](../adr/002-mttt-measurement-protocol.md).
