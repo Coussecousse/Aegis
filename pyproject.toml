@@ -56,9 +56,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--strict-markers"
+addopts = "--strict-markers -m 'not benchmark'"
 markers = [
   "critical: mark a test as covering a critical non-negotiable constraint",
+  "benchmark: KPI/benchmark tests; excluded from the default run (see make benchmark-ci)",
 ]
 
 [tool.coverage.run]

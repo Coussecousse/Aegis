@@ -61,6 +61,9 @@ test-critical: ## Run only @pytest.mark.critical tests
 	  if [ $$code -eq 5 ]; then echo "No critical tests found — expected at this stage."; exit 0; fi; \
 	  exit $$code
 
+benchmark-ci: ## Run Level-1 KPI benchmarks (deterministic, no Pi); writes docs/benchmarks/kpi-ci-latest.json
+	$(VENV_BIN)/pytest -m benchmark --no-cov --tb=short
+
 security-scan: ## Run bandit + pip-audit
 	$(VENV_BIN)/bandit -r src/ -ll
 	$(VENV_BIN)/pip-audit
