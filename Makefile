@@ -64,6 +64,14 @@ test-critical: ## Run only @pytest.mark.critical tests
 benchmark-ci: ## Run Level-1 KPI benchmarks (deterministic, no Pi); writes docs/benchmarks/kpi-ci-latest.json
 	$(VENV_BIN)/pytest -m benchmark --no-cov --tb=short
 
+benchmark: ## Live KPI run (needs stack + Pi). SCENARIO=all INTENSITY=standard
+	$(VENV_BIN)/python -m scripts.benchmark.run_attack_suite \
+	  --scenario "$(or $(SCENARIO),all)" --intensity "$(or $(INTENSITY),standard)" \
+	  | tee /tmp/aegis-bench-window.txt
+	@since=$$(grep -o '"t0": "[^"]*"' /tmp/aegis-bench-window.txt | head -1 | cut -d'"' -f4); \
+	until=$$(grep -o '"t1": "[^"]*"' /tmp/aegis-bench-window.txt | head -1 | cut -d'"' -f4); \
+	$(VENV_BIN)/python -m scripts.benchmark.collect_kpis --since "$$since" --until "$$until"
+
 security-scan: ## Run bandit + pip-audit
 	$(VENV_BIN)/bandit -r src/ -ll
 	$(VENV_BIN)/pip-audit

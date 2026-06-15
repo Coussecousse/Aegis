@@ -43,6 +43,9 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B"]
+# Benchmark harness intentionally opens localhost URLs (S310) and runs known
+# security tools via subprocess (S603/S607) against the local test target.
+"scripts/benchmark/*" = ["S310", "S603", "S607"]
 
 [tool.ruff.format]
 quote-style = "double"
