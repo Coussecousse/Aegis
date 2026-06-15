@@ -112,12 +112,16 @@ Depth — aegis.triage / aegis.reports").
 
 ## Results
 
-_To be filled in after running the Kali attack scenario against both
-architectures._
+This protocol is now executed by the KPI harness (see
+[`docs/benchmarks/README.md`](../benchmarks/README.md) and
+[ADR 003](003-kpi-benchmark-protocol.md)): `make benchmark` replays the scenario
+matrix and `collect_kpis.py` emits these four figures (MTTT p50/p95,
+`stage="llm"` p95, `aegis.triage` peak) into `docs/benchmarks/report-<ts>.md`.
+Fill the table below from a representative run on each architecture.
 
 | Metric | Before (shared semaphore) | After (partitioned instances) |
 |---|---|---|
-| MTTT p50 (s) | _TBD_ | _TBD_ |
-| MTTT p95 (s) | _TBD_ | _TBD_ |
-| `stage="llm"` p95 (s) | _TBD_ | _TBD_ |
-| `aegis.triage` peak depth | _TBD_ | _TBD_ |
+| MTTT p50 (s) | _run `make benchmark`_ | _run `make benchmark`_ |
+| MTTT p95 (s) | _run `make benchmark`_ | _run `make benchmark`_ |
+| `stage="llm"` p95 (s) | _run `make benchmark`_ | _run `make benchmark`_ |
+| `aegis.triage` peak depth | _run `make benchmark`_ | _run `make benchmark`_ |
