@@ -25,6 +25,7 @@ Zero cloud calls. Zero automatic remediation (human validation required).
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
@@ -64,6 +65,7 @@ async def triage_log(
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,
     slm_model: str = _DEFAULT_SLM_MODEL,
+    on_unprofiled_asset: Callable[[str], Awaitable[None]] | None = None,
 ) -> EscalatedAlert | None:
     """
     Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
@@ -248,6 +250,13 @@ async def triage_log(
             )
         )
         return None
+
+    # UEBA self-update: an unprofiled asset (no baseline) triggers an identity sync
+    # so its UEBA context is populated for next time. Self-limiting — once synced,
+    # has_baseline becomes True and this stops firing. Failures here must not drop
+    # the alert, so the publisher swallows its own errors.
+    if not rag.ueba.has_baseline and on_unprofiled_asset is not None:
+        await on_unprofiled_asset(log.source_ip)
 
     # ========================================================================
     # STEP 3b: UEBA false-positive gate

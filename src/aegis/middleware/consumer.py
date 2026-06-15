@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -32,6 +33,12 @@ logger = logging.getLogger(__name__)
 # Routing key used to hand escalated alerts from the triage stage to the
 # analysis stage — bound to the (already provisioned) aegis.reports queue.
 ESCALATED_ALERT_ROUTING_KEY = "alert.escalated"
+
+# Routing key that enqueues an identity-sync job — bound to the identity.sync queue.
+IDENTITY_SYNC_ROUTING_KEY = "identity.sync"
+# Don't re-enqueue a sync for the same asset within this window (the first sync is
+# still in flight); once it lands, has_baseline flips True and triage stops asking.
+_IDENTITY_SYNC_DEDUP_TTL = 300.0
 
 
 class TriageProcessor:
@@ -59,6 +66,7 @@ class TriageProcessor:
         self._stack: AsyncExitStack | None = None
         self._ollama: OllamaClient | None = None
         self._chroma: ChromaDBClient | None = None
+        self._recently_synced: dict[str, float] = {}
 
     async def __aenter__(self) -> TriageProcessor:
         stack = AsyncExitStack()
@@ -73,6 +81,14 @@ class TriageProcessor:
         if self._stack is not None:
             await self._stack.aclose()
 
+    def _should_request_sync(self, asset_id: str, now: float) -> bool:
+        """True (and records) when an identity sync for this asset is not deduped."""
+        last = self._recently_synced.get(asset_id)
+        if last is not None and now - last < _IDENTITY_SYNC_DEDUP_TTL:
+            return False
+        self._recently_synced[asset_id] = now
+        return True
+
     async def process(self, payload: dict[str, Any], publish: Publisher) -> None:
         """Triage one alert; publish an EscalatedAlert when it survives the gates."""
         if self._ollama is None or self._chroma is None:
@@ -83,6 +99,20 @@ class TriageProcessor:
         except ValidationError as exc:
             raise UnprocessableMessageError(f"invalid WazuhLog: {exc}") from exc
 
+        async def _request_identity_sync(asset_id: str) -> None:
+            if not self._should_request_sync(asset_id, time.monotonic()):
+                return
+            body = json.dumps({"asset_id": asset_id}).encode("utf-8")
+            try:
+                await publish(IDENTITY_SYNC_ROUTING_KEY, body)
+                logger.info(json.dumps({"event": "identity_sync_requested", "asset_id": asset_id}))
+            except Exception as exc:  # a sync-publish failure must not drop the alert
+                logger.warning(
+                    json.dumps(
+                        {"event": "identity_sync_failed", "asset_id": asset_id, "error": str(exc)}
+                    )
+                )
+
         escalated = await triage_log(
             log=log,
             ollama_client=self._ollama,
@@ -91,6 +121,7 @@ class TriageProcessor:
             suspicion_threshold=self.suspicion_threshold,
             slm_timeout=self.slm_timeout,
             slm_model=self.slm_model,
+            on_unprofiled_asset=_request_identity_sync,
         )
 
         if escalated is not None:
