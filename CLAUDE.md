@@ -164,7 +164,15 @@ aegis/
 ├── tests/
 │   ├── unit/
 │   └── integration/
-└── docs/
+└── docs/                       # See docs/architecture.md for the full file map
+    ├── architecture.md         # Repo file map (source of truth for "where is X")
+    ├── middleware.md           # Pipeline, gates, risk scoring, reliability
+    ├── ueba.md                 # Identity store, gate, behavioral anomaly scoring
+    ├── wazuh-alerts.md         # Wazuh alert format ingested + filtering
+    ├── soar-response-actions.md # Human-validated containment (Shuffle) — current + planned
+    ├── testing.md              # Test layers + how to run
+    ├── benchmarks/README.md    # KPIs (targets, results, reproduce)
+    ├── runbooks/               # poc-linux-startup.md, wazuh-rules.md
     ├── adr/                    # Architecture Decision Records (MADR format)
     ├── modelfiles/             # Official Ollama Modelfiles for Raspberry Pi deployment
     └── raspberrypi-ollama-setup.md  # Raspberry Pi Ollama deployment guide

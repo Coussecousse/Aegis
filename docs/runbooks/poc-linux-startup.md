@@ -325,6 +325,59 @@ open http://localhost:15672  # Queues tab
 
 ---
 
+## Message reliability — queue TTL, dead-letter & overload
+
+AEGIS must never *silently* lose an alert. Here is exactly how the RabbitMQ
+topology guarantees that, and what happens under overload.
+
+**Flow:** collector → `aegis.triage` → (escalated) → `aegis.reports` → analysis.
+Both queues are **durable** and every message is published **persistent**
+(`delivery_mode=2`), so a broker restart cannot lose an in-flight alert.
+
+**TTL (time-to-live):** both `aegis.triage` and `aegis.reports` carry
+`x-message-ttl = 3600000` (**1 hour**) and `x-max-length = 10000`. The TTL is a
+deliberate back-pressure / staleness bound — it caps how long an alert may wait
+before it is considered too stale to analyse in real time.
+
+**Dead-letter (the safety net):** both queues set
+`x-dead-letter-exchange = aegis.alerts` / `x-dead-letter-routing-key = alert.dead`,
+which routes to the durable **`aegis.deadletter`** queue. A message is dead-lettered
+(never discarded) when it:
+- waits longer than the 1 h TTL (the analysis backlog is too deep), **or**
+- overflows `x-max-length` (oldest first), **or**
+- is rejected after a processing error with `on_error="dead_letter"`.
+
+**What happens past 1 h / under overload:** the message is **parked in
+`aegis.deadletter`** — persistent, durable, inspectable. It is **not analysed**
+(no report, no SOAR) but it is **not lost**. This is a SOC "parking lot": *"could
+not process in time — a human must review."* There is no automatic reprocessing.
+
+```bash
+# How many alerts are parked for manual review?
+curl -s -u "$RABBITMQ_USER:$RABBITMQ_PASSWORD" \
+  http://localhost:15672/api/queues/aegis/aegis.deadletter | python3 -c \
+  'import sys,json;print("deadletter:",json.load(sys.stdin).get("messages"))'
+
+# Peek at why messages were parked (x-death reason + origin queue), without consuming:
+curl -s -u "$RABBITMQ_USER:$RABBITMQ_PASSWORD" -X POST \
+  -H 'content-type: application/json' \
+  -d '{"count":10,"ackmode":"reject_requeue_true","encoding":"auto","truncate":500}' \
+  http://localhost:15672/api/queues/aegis/aegis.deadletter/get | python3 -m json.tool
+```
+
+**Design decision (chosen):** TTL 1 h **+** dead-letter parking. The alternative
+(no TTL → every alert is eventually analysed, even hours late) was rejected because
+unbounded latency makes a "real-time" report meaningless and grows memory without
+bound. Both options avoid *silent* loss; we prefer **bounded staleness with a
+visible parking lot**.
+
+**Root cause of any deadletter growth is capacity, not config.** The Raspberry Pi
+analyses ~6–9 min per report **serially** (~7–10 reports/hour). Sustained higher
+load cannot be fixed by queue tuning — it needs more capacity (faster Pi, parallel
+analysis, or a second node). That is the subject of the Phase-2 load benchmark.
+
+---
+
 ## Partie C — Raspberry Pi setup (manual, done once)
 
 Replace `PI_USER` and `PI_IP` with your Pi's username and WireGuard IP (e.g. `10.0.0.1`).
@@ -921,8 +974,8 @@ management UI (http://localhost:15672 → Queues).
 
 **Cause**: TinyLlama 1.1B always returned the same `confidence: 0.88` /
 `behavior_category: lateral_movement` regardless of the alert content — a 1.1B model is
-too small to reason from data and instead copies the example values baked into
-`Modelfile.slm-tinyllama` verbatim.
+too small to reason from data and instead copied the example values from its Modelfile
+verbatim (that `Modelfile.slm-tinyllama` has since been removed).
 
 **Fix**: switched the SLM to **Qwen 2.5 1.5B** (Apache 2.0) — still small enough for
 CPU-only inference on the Pi (~1 GB RAM, ~8-18 s per triage when idle) but noticeably

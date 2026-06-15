@@ -72,11 +72,17 @@ A sustained soak (hundreds of alerts, parallel) — does AEGIS hold?
 | KPI | Target | Result |
 |---|---|---|
 | MTTT triage p95 (under load) | < 90 s | ✅ 58.5 s (sample) |
-| Alert loss | 0 | ✅ 0 |
+| Silent alert loss | 0 | ✅ 0 (overload → `aegis.deadletter` parking, not discarded) |
 | `aegis.triage` drains / `aegis.reports` drains after run | drains | ✅ |
 | SOAR delivery | ≥ 99 % | ✅ 100 % |
 | Pi CPU / temperature | < 90 % / < 80 °C | 64 % / 68 °C |
 | Wazuh agent CPU | < 5 % | _measure via Wazuh API_ |
+
+> **Zero-loss model:** both `aegis.triage` and `aegis.reports` are durable with
+> persistent messages, a 1 h TTL and a dead-letter exchange. Nothing is ever
+> silently dropped — an alert that can't be analysed within 1 h (Pi backlog) is
+> *parked* in `aegis.deadletter` for human review. See
+> [poc-linux-startup.md → Message reliability](../runbooks/poc-linux-startup.md#message-reliability--queue-ttl-dead-letter--overload).
 
 **Reproduce**
 ```bash
@@ -87,28 +93,50 @@ Pi CPU/RAM/temperature need a `node_exporter` on the Pi scraped by Prometheus
 
 ---
 
-## 4. UEBA — pluggable DB + auto-update
+## 4. UEBA — pluggable DB, auto-update & behavioral scoring
 
-UEBA context comes from an identity store and must (a) work with **any** store and
-(b) **update itself**. The store is pluggable via the `BaseIdentityConnector` seam
-(LDAP today, Active Directory/Okta = a new adapter, nothing else changes). An alert
-on an **unprofiled asset** auto-enqueues a sync that populates its context.
+UEBA context comes from an identity store and must (a) work with **any** store, (b)
+**update itself**, and (c) score **behavior**, not just privilege. The store is
+pluggable via the `BaseIdentityConnector` seam (LDAP today, Active Directory/Okta =
+a new adapter, nothing else changes). An alert on an **unprofiled asset**
+auto-enqueues a sync that populates its context.
 
-| KPI | Target | Result |
+These KPIs are **rates over a population** (assets, attacks), not single pass/fail
+checks — measured deterministically and written to `kpi-ci-latest.json`.
+
+### 4.1 Coverage, detection & gate (measured)
+
+| KPI | Definition (population) | Target | Measured (2026-06-15) |
+|---|---|---|---|
+| **Sync coverage** | directory assets profiled in UEBA / total | 100 % | ✅ 100 % (6/6) |
+| **Tier correctness** | profiled assets with the right criticality / total | 100 % | ✅ 100 % (6/6) |
+| **Identity-attack detection** | corpus identity attacks (rules 100xxx) escalated / total | 100 % | ✅ 100 % (5/5) |
+| **Gate decision matrix** | correct escalate/discard decisions / cases | 100 % | ✅ 100 % (7/7) |
+| **Connector fallback (DB down)** | degrades gracefully, no crash | graceful | ✅ |
+| **Connector idempotence** | re-sync creates no duplicate | yes | ✅ |
+| **Auto-sync on unprofiled / dedup** | sync triggered on unknown asset / 1 per burst | 100 % / 1 | ✅ |
+
+### 4.2 Behavioral anomaly score — Gap 2 (measured)
+
+`anomaly_score` is now a **behavioral** signal (trailing event window + EWMA
+baseline in `aegis.rag.ueba`), decoupled from privilege — privilege stays in the
+asset tier / risk-scorer criticality multiplier. A burst above an asset's own
+baseline raises the score; sustained load is absorbed back to normal.
+
+| KPI | Target | Measured |
 |---|---|---|
-| Auto-sync triggered on unprofiled asset | 100 % | ✅ |
-| No sync when already profiled | 100 % | ✅ |
-| Dedup under burst (same asset → 1 sync) | 1 | ✅ |
-| Connector fallback when the DB is down | graceful | ✅ |
-| Time-to-profile (after sync → `has_baseline=True`) | profiled | ✅ |
+| Score at rest (activity ≈ baseline) | ≤ 0.10 | ✅ 0.00 |
+| Score at burst peak (≥ baseline × 3) | ≥ 0.80 | ✅ 1.00 |
+| Score decays after sustained load | back to rest | ✅ 0.005 |
+| Score stays bounded `[0,1]` | strict | ✅ |
 
 **Reproduce** (deterministic, no Pi)
 ```bash
-make test    # tests in tests/unit/middleware/ + tests/integration/test_pipeline.py
+make benchmark-ci    # runs the benchmark suite; writes docs/benchmarks/kpi-ci-latest.json
+# UEBA-only:
+.venv/bin/pytest tests/benchmarks/test_ueba_kpis.py tests/benchmarks/test_connector_kpis.py \
+  tests/benchmarks/test_ueba_population_kpis.py tests/benchmarks/test_anomaly_kpis.py -m benchmark
 ```
-
-> **Next (UEBA Gap 2)**: a behavioral, time-based `anomaly_score` (replacing the
-> current identity-derived heuristic), with its own KPIs.
 
 ---
 

@@ -35,6 +35,22 @@ companies that must meet NIS 2 requirements but do not have a dedicated SOC team
 - All AI inference runs locally on a Raspberry Pi 5 with Ollama: no subscription, no external
   dependency, and no data leaving the network.
 
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Repository map — what every file/area is for. |
+| [docs/middleware.md](docs/middleware.md) | The orchestration core: the two-stage pipeline, gates, risk scoring, reliability. |
+| [docs/ueba.md](docs/ueba.md) | Asset context: pluggable identity store, auto-update, behavioral anomaly scoring. |
+| [docs/wazuh-alerts.md](docs/wazuh-alerts.md) | The Wazuh alert format AEGIS ingests + how it's filtered/mapped. |
+| [docs/soar-response-actions.md](docs/soar-response-actions.md) | Human-validated containment in Shuffle: current flow + planned per-attack actions. |
+| [docs/testing.md](docs/testing.md) | Test layers (unit / integration / KPI benchmarks) and how to run them. |
+| [docs/benchmarks/README.md](docs/benchmarks/README.md) | KPIs: targets, measured results, and how to reproduce. |
+| [docs/runbooks/poc-linux-startup.md](docs/runbooks/poc-linux-startup.md) | End-to-end POC startup (Juice Shop target, Kali attacks, Shuffle). |
+| [docs/raspberrypi-ollama-setup.md](docs/raspberrypi-ollama-setup.md) | Node 2 setup — Raspberry Pi + Ollama (SLM + LLM). |
+| [docs/runbooks/wazuh-rules.md](docs/runbooks/wazuh-rules.md) | Custom Wazuh detection rules reference. |
+| [docs/adr/](docs/adr/) | Architecture Decision Records. |
+
 ## Stack
 
 | Layer | Component | Version |
@@ -67,7 +83,8 @@ Hosts: Ollama with Qwen 2.5 1.5B (triage) and Mistral 7B Q4
 service. Node 1 reaches it via HTTP on the local network.
 
 Docker configuration lives in `docker/node1/`.
-See `docker/node2/README.md` for Node 2 setup instructions.
+See [`docs/raspberrypi-ollama-setup.md`](docs/raspberrypi-ollama-setup.md) for Node 2
+(Raspberry Pi / Ollama) setup instructions.
 
 ### Runtime Modes (Node 1)
 
