@@ -15,6 +15,7 @@ else
 endif
 
 .PHONY: help install lint format format-fix typecheck test test-critical \
+        benchmark-ci benchmark benchmark-quality benchmark-quality-score benchmark-load \
         security-scan pre-commit-all clean \
 	docker-check docker-build docker-up docker-up-core docker-up-full docker-ps docker-logs \
 	docker-down docker-clean docker-restart docker-pull docker-pull-full \
