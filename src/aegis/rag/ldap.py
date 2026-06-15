@@ -182,7 +182,12 @@ class LdapConnector(BaseIdentityConnector):
                 associated_users=[account_name] if account_name else [],
                 normal_activity_window="Unknown",
                 recent_anomalies=groups,
-                anomaly_score=1.0 if criticality == "tier0" else 0.3,
+                # Privilege is carried by asset_criticality (tier) + the risk scorer's
+                # criticality multiplier — NOT by anomaly_score. anomaly_score is a
+                # purely behavioral signal that accrues from observed activity
+                # (see aegis.rag.ueba / ChromaDBClient.record_activity), so a freshly
+                # synced asset starts at 0.0 until its behavior says otherwise.
+                anomaly_score=0.0,
             ),
         )
 

@@ -5,11 +5,13 @@ import importlib
 import inspect
 import json
 import logging
+import time
 from typing import Any, Literal, cast
 
 import httpx
 
 from aegis.middleware.models import RagContext, UEBAMetrics
+from aegis.rag import ueba
 from aegis.rag.base import BaseIdentityConnector
 
 logger = logging.getLogger(__name__)
@@ -120,6 +122,55 @@ class ChromaDBClient:
             logger.exception("Unexpected ChromaDB error while fetching asset context")
             return self._create_default_context(asset_identifier)
 
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        """Record one activity event for an asset and recompute its behavioral score.
+
+        Updates the trailing event window + EWMA baseline persisted in ChromaDB
+        (Gap 2 behavioral UEBA) and returns the asset context with a fresh
+        ``anomaly_score`` reflecting how far recent activity deviates from the
+        asset's own baseline. For an **unprofiled** asset (not in ChromaDB) this
+        is a no-op returning the tier2 default — behavioral baselines only apply
+        to known assets; an unprofiled one still fails open in triage.
+
+        Args:
+            asset_identifier: Asset identifier (hostname, id, or IP).
+            now: Event timestamp (epoch seconds); defaults to the current time.
+
+        Returns:
+            RagContext: Context with the recomputed behavioral anomaly score, or
+            the tier2 fallback for an unknown/erroring asset.
+        """
+        ts_now = time.time() if now is None else now
+        try:
+            collection = await self._ensure_collection()
+            results = await self._call(collection.get, ids=[asset_identifier])
+            metadatas = results.get("metadatas", []) if isinstance(results, dict) else []
+            metadata = metadatas[0] if isinstance(metadatas, list) and metadatas else None
+            if not isinstance(metadata, dict):
+                return self._create_default_context(asset_identifier)
+
+            meta = dict(cast(dict[str, Any], metadata))
+            window = ueba.prune_window(
+                self._parse_float_list(meta.get("event_timestamps", "[]")), ts_now
+            )
+            window.append(ts_now)
+            recent_count = len(window)
+            baseline = float(meta.get("baseline_rate", 1.0) or 1.0)
+
+            meta["anomaly_score"] = str(ueba.anomaly_score(recent_count, baseline))
+            meta["baseline_rate"] = str(ueba.update_baseline(baseline, recent_count))
+            meta["event_timestamps"] = json.dumps(window)
+
+            await self._call(
+                collection.upsert, ids=[asset_identifier], metadatas=[meta], embeddings=[[0.0]]
+            )
+            return self._context_from_metadata(asset_identifier, meta)
+        except (httpx.TimeoutException, TimeoutError):
+            return self._create_default_context(asset_identifier)
+        except Exception:
+            logger.exception("Failed to record activity for behavioral UEBA")
+            return self._create_default_context(asset_identifier)
+
     def _context_from_metadata(self, asset_identifier: str, metadata: dict[str, Any]) -> RagContext:
         """Convert Chroma metadata into the local RagContext model."""
         raw_criticality = str(metadata.get("asset_criticality", "tier2"))
@@ -185,6 +236,26 @@ class ChromaDBClient:
             recent_anomalies=recent_anomalies,
             anomaly_score=float(anomaly_score_raw),
         )
+
+    @staticmethod
+    def _parse_float_list(value: Any) -> list[float]:
+        """Parse a metadata list of floats from a JSON string or native list."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return []
+        elif isinstance(value, list):
+            parsed = value
+        else:
+            return []
+        out: list[float] = []
+        for item in parsed if isinstance(parsed, list) else []:
+            try:
+                out.append(float(item))
+            except (TypeError, ValueError):
+                continue
+        return out
 
     @staticmethod
     def _parse_string_list(value: Any) -> list[str]:

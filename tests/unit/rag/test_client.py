@@ -323,3 +323,71 @@ def test_tier0_mapping_yields_criticality_multiplier_1_5() -> None:
     score = compute_risk_score(slm=slm, llm=llm, rule_level=10, asset_criticality="tier0")
 
     assert score.score_breakdown["criticality_multiplier"] == 1.5
+
+
+class _StatefulCollection:
+    """Fake collection that persists upserts, so record_activity can be exercised
+    across calls (a burst must actually raise the stored anomaly score)."""
+
+    def __init__(self, metadata: dict[str, Any] | None) -> None:
+        self._metadata = metadata
+        self.upsert_calls = 0
+
+    async def get(self, ids: list[str]) -> dict[str, Any]:
+        _ = ids
+        return {"metadatas": [self._metadata] if self._metadata is not None else []}
+
+    async def upsert(self, **kwargs: Any) -> None:
+        self._metadata = kwargs["metadatas"][0]
+        self.upsert_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_record_activity_raises_anomaly_on_burst(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _StatefulCollection(
+        {
+            "asset_name": "WS-01",
+            "asset_criticality": "tier2",
+            "asset_description": "Workstation",
+            "baseline_description": "behavioral",
+            "associated_users": "[]",
+            "normal_activity_window": "Unknown",
+            "recent_anomalies": "[]",
+            "anomaly_score": "0.0",
+            "baseline_rate": "1.0",
+            "event_timestamps": "[]",
+        }
+    )
+    monkeypatch.setattr(
+        rag_client_module, "_get_chromadb_module", lambda: _FakeChromaModule(collection)
+    )
+
+    scores: list[float] = []
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        # A burst of events at the same instant (all inside the window).
+        for _ in range(8):
+            ctx = await client.record_activity("WS-01", now=1000.0)
+            scores.append(ctx.ueba.anomaly_score)
+
+    assert scores[0] == 0.0  # first event is at baseline
+    assert max(scores) > 0.5  # the burst is detected at its peak
+    # The EWMA baseline then absorbs sustained load, so the score decays back.
+    assert scores[-1] < max(scores)
+    assert all(0.0 <= s <= 1.0 for s in scores)
+    assert collection.upsert_calls == 8
+
+
+@pytest.mark.asyncio
+async def test_record_activity_unprofiled_returns_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _StatefulCollection(None)  # asset absent from ChromaDB
+    monkeypatch.setattr(
+        rag_client_module, "_get_chromadb_module", lambda: _FakeChromaModule(collection)
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        ctx = await client.record_activity("unknown-asset", now=1000.0)
+
+    assert ctx.asset_criticality == "tier2"
+    assert ctx.ueba.has_baseline is False
+    assert ctx.ueba.anomaly_score == 0.0
+    assert collection.upsert_calls == 0  # nothing to record for an unprofiled asset
