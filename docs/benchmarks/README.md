@@ -63,23 +63,55 @@ both git-ignored). **Pi resource KPIs** (CPU/RAM/temperature) require a
 `node_exporter` on the Pi scraped by Prometheus (`10.0.0.1:9100`); the Wazuh
 agent CPU comes from the Wazuh API.
 
-## SLO targets (provisional — first representative run sets the baseline)
+## SLO targets — acceptable thresholds and rationale
 
-| KPI | Target | Source |
-|---|---|---|
-| MTTT (triage) p95 | < 90 s (SLM-bound) | `aegis_pipeline_duration_seconds{stage="triage"}` |
-| SLM p95 | 50–90 s | `stage="slm"` |
-| RAG p95 | < 1 s | `stage="rag"` |
-| LLM p95 | 240–700 s (flag > `LLM_TIMEOUT`) | `stage="llm"` |
-| `aegis.triage` peak depth | ≈ 0 during bursts | `rabbitmq_queue_messages` |
-| `aegis.reports` | drains after the run | `rabbitmq_queue_messages` |
-| LLM JSON-valid rate | 100 % (structured outputs) | middleware logs |
-| Report field completeness | 100 % | Level-1 KPI |
-| Action specificity (known rules) | 100 % | Level-1 KPI |
-| Severity (confirmed attack) | ≥ high | Level-1 KPI |
-| Alert loss under soak | 0 | event count vs alerts fired |
-| SOAR delivery success | ≥ 99 % | `aegis_soar_deliveries_total` |
-| Wazuh agent CPU | < 5 % (CLAUDE.md rule 2) | Wazuh API |
+Provisional; the first representative live run sets the real baseline. "Why this
+number" matters as much as the number.
+
+| KPI | Acceptable threshold | Rationale | Source |
+|---|---|---|---|
+| **Attack recall** (real attacks escalated) | **≥ 95 %** | missing a real attack is the worst failure; aim 100 % on the corpus | Level-1 |
+| **False-positive rate** (benign alert → LLM report) | **≤ 5 %** | each FP burns one ~5-9 min LLM cycle; human-in-the-loop tolerates a little, the Pi budget does not | Level-1 (benign corpus) / live |
+| MTTT (triage) p95 | **< 90 s** | triage must stay near real-time so the queue never backs up; SLM-bound | `…{stage="triage"}` |
+| SLM p95 | 50–90 s | 1 core, ~1 tok/s on the Pi (documented hardware reality) | `stage="slm"` |
+| RAG p95 | < 1 s | local ChromaDB lookup | `stage="rag"` |
+| LLM p95 (response time) | **< `LLM_TIMEOUT` (600 s)**, target < 420 s | report must land while the incident is fresh; flag every breach | `stage="llm"` |
+| End-to-end (alert → report) p95 | < ~10 min | acceptable for a human-validated report on this hardware | `stage="total"` |
+| `aegis.triage` peak depth | ≈ 0 during bursts | proves triage absorbs the flux (the two-stage win) | `rabbitmq_queue_messages` |
+| `aegis.reports` | drains after the run | no permanent backlog | `rabbitmq_queue_messages` |
+| LLM JSON-valid rate | 100 % | structured outputs; an invalid report falls back to SLM-only | middleware logs |
+| Report field completeness | 100 % | a report missing fields isn't actionable | Level-1 |
+| Action specificity (known rules) | 100 % | the action must name the real IP/endpoint (playbook) | Level-1 |
+| Severity (confirmed attack) | ≥ high | a confirmed attack must not be diluted to medium | Level-1 |
+| Alert loss under soak | **0** | losing alerts under load is unacceptable for a SOC | fired vs observed |
+| SOAR delivery success | ≥ 99 % | reports must reach the human-validation workflow | `aegis_soar_deliveries_total` |
+| Wazuh agent CPU | **< 5 %** (CLAUDE.md rule 2, non-negotiable) | exceeding it risks stopping industrial production | Wazuh API |
 
 Targets are codified in [ADR 003](../adr/003-kpi-benchmark-protocol.md). The
 MTTT before/after protocol is [ADR 002](../adr/002-mttt-measurement-protocol.md).
+
+## Current results
+
+### Level 1 — deterministic (`make benchmark-ci`, latest run on the seed corpus)
+
+| KPI | Result | Threshold | Status |
+|---|---|---|---|
+| Attack recall (escalated) | 12 / 12 (100 %) | ≥ 95 % | ✅ |
+| Report JSON-valid | 12 / 12 (100 %) | 100 % | ✅ |
+| Action specificity | 12 / 12 (100 %) | 100 % | ✅ |
+| Severity calibration | 12 / 12 ≥ floor | ≥ high (confirmed) | ✅ |
+| UEBA gate matrix | 6 / 6 correct | 100 % | ✅ |
+| False-positive rate (noise filter on) | 0 % | ≤ 5 % | ✅ |
+| False-positive rate (noise filter off) | 33 % | — | ⚠️ shows why `WAZUH_EXCLUDED_RULES` matters |
+| Identity connector (sync/idempotence/fallback) | pass | pass | ✅ |
+
+Machine-readable snapshot: `docs/benchmarks/kpi-ci-latest.json` (regenerated each
+run, git-ignored).
+
+### Level 2 — live (`make benchmark`)
+
+**Pending a representative Kali run.** The harness mechanics are verified
+(purge → attack → Prometheus + log collection → report), but the live latency,
+throughput, semantic-quality and resource numbers are captured during a real
+session and recorded here + in the ADR 002 Results table. Requires `node_exporter`
+on the Pi for CPU/RAM/temperature.
