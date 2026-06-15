@@ -9,14 +9,19 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
-_ARTIFACT = (
-    pathlib.Path(__file__).resolve().parents[2] / "docs" / "benchmarks" / "kpi-ci-latest.json"
-)
+# Make the repo root importable so benchmark tests can import the (uninstalled)
+# `scripts.benchmark` harness package.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+_ARTIFACT = _REPO_ROOT / "docs" / "benchmarks" / "kpi-ci-latest.json"
 
 
 @pytest.fixture(scope="session")
