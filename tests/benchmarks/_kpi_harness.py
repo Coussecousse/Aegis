@@ -122,11 +122,19 @@ class _FakeShuffle:
         return True
 
 
+# Production noise filter: infra-host self-monitoring rules dropped before triage
+# (see WAZUH_EXCLUDED_RULES). Used by the false-positive KPI.
+NOISE_FILTER: frozenset[int] = frozenset({533})
+
+
 async def run_canonical(
-    raw_alert: dict[str, Any], *, is_attack: bool
+    raw_alert: dict[str, Any],
+    *,
+    is_attack: bool,
+    excluded_rules: frozenset[int] = frozenset(),
 ) -> tuple[WazuhLog | None, AegisReport | None]:
     """Parse → triage → analyze one raw alert with canonical model responses."""
-    parsed = WazuhAlertParser.parse_alert(raw_alert, min_level=7)
+    parsed = WazuhAlertParser.parse_alert(raw_alert, min_level=7, excluded_rules=excluded_rules)
     if parsed is None:
         return None, None
 
