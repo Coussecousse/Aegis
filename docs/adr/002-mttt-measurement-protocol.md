@@ -119,9 +119,13 @@ matrix and `collect_kpis.py` emits these four figures (MTTT p50/p95,
 `stage="llm"` p95, `aegis.triage` peak) into `docs/benchmarks/report-<ts>.md`.
 Fill the table below from a representative run on each architecture.
 
+After-column figures below are a first **smoke sample** (2026-06-15, scenario B,
+2 escalated alerts, 1 LLM cycle) — not yet a sustained run. The Before column
+needs a run on the pre-`b9cf8ad` architecture.
+
 | Metric | Before (shared semaphore) | After (partitioned instances) |
 |---|---|---|
-| MTTT p50 (s) | _run `make benchmark`_ | _run `make benchmark`_ |
-| MTTT p95 (s) | _run `make benchmark`_ | _run `make benchmark`_ |
-| `stage="llm"` p95 (s) | _run `make benchmark`_ | _run `make benchmark`_ |
-| `aegis.triage` peak depth | _run `make benchmark`_ | _run `make benchmark`_ |
+| MTTT p50 (s) | _TBD_ | 45.0 (smoke) |
+| MTTT p95 (s) | _TBD_ | 58.5 (smoke) |
+| `stage="llm"` p95 (s) | _TBD_ | 291 (smoke) |
+| `aegis.triage` peak depth | _TBD_ | 2 (smoke, 2-alert burst) |

@@ -110,8 +110,21 @@ run, git-ignored).
 
 ### Level 2 — live (`make benchmark`)
 
-**Pending a representative Kali run.** The harness mechanics are verified
-(purge → attack → Prometheus + log collection → report), but the live latency,
-throughput, semantic-quality and resource numbers are captured during a real
-session and recorded here + in the ADR 002 Results table. Requires `node_exporter`
-on the Pi for CPU/RAM/temperature.
+First live sample (2026-06-15, scenario B / SQLi, intensity smoke — 2 escalated
+alerts, 1 completed LLM cycle on the Raspberry Pi):
+
+| KPI | Measured | Threshold | Status |
+|---|---|---|---|
+| MTTT triage p50 / p95 | 45 s / 58.5 s | p95 < 90 s | ✅ |
+| SLM p95 | 58.5 s | 50–90 s | ✅ |
+| RAG p95 | 0.095 s | < 1 s | ✅ |
+| LLM p95 (response time) | 291 s | < 600 s (target < 420) | ✅ |
+| SOAR delivery success | 100 % | ≥ 99 % | ✅ |
+| LLM JSON-valid rate | 100 % (1/1) | 100 % | ✅ |
+| `aegis.triage` peak depth | 2 | ≈ 0 | ⚠️ tiny sample (2 near-simultaneous alerts, 1-core SLM) |
+
+**Still pending**: a sustained `soak` run (hundreds of alerts, parallel Kali
+tools) to validate backpressure / zero-loss under load, and Pi resource KPIs
+(CPU/RAM/temperature) which need `node_exporter` on the Pi, plus the Wazuh-agent
+CPU < 5 % check via the Wazuh API. These fill the remaining gaps and the ADR 002
+"Before" column (pre-`b9cf8ad` architecture).
