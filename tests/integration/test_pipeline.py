@@ -109,6 +109,7 @@ async def _run_pipeline(
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,
     llm_timeout: float = 45.0,
+    response_policies: dict[int, object] | None = None,
 ) -> AegisReport | None:
     """Chain triage_log + analyze_log — mirrors the old single-shot process_log
     end-to-end so existing scenario assertions stay meaningful across the split."""
@@ -126,6 +127,7 @@ async def _run_pipeline(
         ollama_client=ollama_client,
         shuffle_client=shuffle_client,
         llm_timeout=llm_timeout,
+        response_policies=response_policies,  # type: ignore[arg-type]
     )
 
 
@@ -451,3 +453,45 @@ async def test_pipeline_soar_error_does_not_crash() -> None:
     assert result is not None
     assert result.decision.auto_remediation_allowed is False
     assert result.decision.requires_human_validation is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_applies_preapproved_response_policy() -> None:
+    # A human pre-approved policy for this Wazuh rule → response recorded on the report
+    # (auto-applied), auto_remediation_allowed True, but the human still gets the incident.
+    from aegis.soar.response_policy import ResponsePolicy
+
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=False))
+    shuffle = _FakeShuffleClient()
+    log = _make_log(
+        rule_level=10,
+        rule_id=5712,
+        full_log="203.0.113.7 sshd: failed password for root",
+        attacker_ip="203.0.113.7",
+    )
+    policies = {5712: ResponsePolicy(5712, "Block {actor} at the firewall", auto=True)}
+
+    result = await _run_pipeline(log, ollama, chroma, shuffle, response_policies=policies)
+
+    assert result is not None
+    applied = result.decision.applied_response
+    assert applied is not None
+    assert applied.rule_id == 5712
+    assert applied.auto_applied is True
+    assert "203.0.113.7" in applied.action
+    assert result.decision.auto_remediation_allowed is True
+    assert result.decision.requires_human_validation is True  # human still receives it
+
+
+@pytest.mark.asyncio
+async def test_pipeline_no_policy_means_no_applied_response() -> None:
+    ollama = _suspect_ollama()
+    chroma = _FakeChromaDBClient(_make_rag("tier2", anomaly_score=0.0, has_baseline=False))
+    shuffle = _FakeShuffleClient()
+
+    result = await _run_pipeline(_make_log(rule_level=7), ollama, chroma, shuffle)
+
+    assert result is not None
+    assert result.decision.applied_response is None
+    assert result.decision.auto_remediation_allowed is False

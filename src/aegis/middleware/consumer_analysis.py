@@ -26,6 +26,7 @@ from aegis.middleware.models import EscalatedAlert
 from aegis.middleware.pipeline import analyze_log
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.soar.client import ShuffleClient
+from aegis.soar.response_policy import load_policies
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class AnalysisProcessor:
         llm_timeout: float = 45.0,
         llm_model: str = "mistral-aegis",
         use_schema: bool = False,
+        response_policy_file: str | None = None,
     ) -> None:
         self.ollama_base_url = ollama_base_url
         self.shuffle_webhook_url = shuffle_webhook_url
@@ -49,6 +51,9 @@ class AnalysisProcessor:
         self.llm_timeout = llm_timeout
         self.llm_model = llm_model
         self.use_schema = use_schema
+        # Human-maintained SOAR response policies (rule_id → pre-defined action),
+        # loaded once at startup; empty (no automatic action) when unconfigured.
+        self.response_policies = load_policies(response_policy_file)
 
         self._stack: AsyncExitStack | None = None
         self._ollama: OllamaClient | None = None
@@ -84,6 +89,7 @@ class AnalysisProcessor:
             llm_timeout=self.llm_timeout,
             llm_model=self.llm_model,
             use_schema=self.use_schema,
+            response_policies=self.response_policies,
         )
 
         if report is not None:
@@ -126,6 +132,7 @@ def build_analysis_consumer(
         llm_timeout=settings.ollama.llm_timeout,
         llm_model=settings.ollama.llm_model,
         use_schema=settings.ollama.use_schema,
+        response_policy_file=settings.response_policy_file,
     )
     return MessageConsumer(
         amqp_url=rmq.amqp_url,
