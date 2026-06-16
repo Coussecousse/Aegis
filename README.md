@@ -72,9 +72,9 @@ Full setup (Node 2, identity connector, attack target, gotchas):
 
 ## Project status
 
-`v0.5.0` (behavioral UEBA, zero-loss reliability, LLM-authored actions, load-tested).
-`v1.0.0` planned (NIS 2 audit). Active branch: `develop`; stable: `main`. See
-[CHANGELOG.md](CHANGELOG.md).
+`v1.0.0` — first stable release (behavioral UEBA, zero-loss reliability, LLM-authored
+actions, pre-approved SOAR response policies). Active branch: `develop`; stable: `main`.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing & license
 

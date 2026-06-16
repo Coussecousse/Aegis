@@ -113,7 +113,7 @@ Reliability: durable queues, persistent messages, 1 h TTL + dead-letter to
 
 ---
 
-## Current State — v0.4.0
+## Current State — v1.0.0
 
 | File | Status |
 |---|---|
