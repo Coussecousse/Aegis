@@ -290,14 +290,6 @@ class ChromaDBClient:
             ),
         )
 
-    async def get_asset_context_by_ip(self, ip_address: str) -> RagContext:
-        """Retrieve asset context by IP address."""
-        return await self.get_asset_context(ip_address)
-
-    async def get_asset_context_by_name(self, asset_name: str) -> RagContext:
-        """Retrieve asset context by asset name."""
-        return await self.get_asset_context(asset_name)
-
     async def index_asset(self, context: RagContext) -> bool:
         """Upsert an asset into ChromaDB metadata collection.
 
@@ -374,22 +366,6 @@ class ChromaDBClient:
         except Exception:
             logger.exception("Failed to sync identity context into ChromaDB")
             return False
-
-    async def get_similar_incidents(self, asset_name: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Return similar incidents for an asset.
-
-        This minimal implementation keeps backward compatibility for callers.
-
-        Args:
-            asset_name: Asset name to query.
-            limit: Maximum incident count.
-
-        Returns:
-            list[dict[str, Any]]: Incident summaries.
-        """
-        _ = asset_name
-        _ = limit
-        return []
 
     async def close(self) -> None:
         """Close ChromaDB async resources when supported by the client implementation."""

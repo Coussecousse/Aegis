@@ -356,7 +356,7 @@ class Decision(BaseModel):
     )
     auto_remediation_allowed: bool = Field(
         ...,
-        description="Automatic remediation allowed (always False in v0.2)",
+        description="Automatic remediation allowed (always False — human-in-the-loop)",
     )
     recommended_action: str = Field(..., description="Recommended remediation action")
 

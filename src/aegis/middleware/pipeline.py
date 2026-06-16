@@ -345,7 +345,7 @@ async def analyze_log(
     Analysis steps (strict order):
     1. LLM: Detailed threat analysis (Mistral 7B) with fallback to SLM confidence
     2. Risk: Compute composite danger_score + uncertainty
-    3. Decision: Determine action (always requires human validation in v0.2)
+    3. Decision: Determine action (always requires human validation)
     4. Report: Create final AegisReport
     5. SOAR: Send to Shuffle webhook
     6. Return: Complete report for human review
@@ -505,8 +505,8 @@ async def analyze_log(
     if llm is not None and llm.attack_confirmed and _rank.get(llm.severity, 0) > _rank[severity]:
         severity = llm.severity
 
-    # CONSTRAINT: In v0.2, human-in-the-loop is mandatory
-    # Zero automatic remediation (auto_remediation_allowed = False)
+    # NON-NEGOTIABLE CONSTRAINT: human-in-the-loop is mandatory.
+    # Zero automatic remediation (auto_remediation_allowed = False).
     requires_human = True
     auto_remediation = False
 
@@ -526,8 +526,7 @@ async def analyze_log(
         # deterministic playbook override — a sovereign local model must reason about the
         # action, not read it from a hardcoded template.
         recommended_action = llm.recommended_action
-        requires_human = llm.requires_human_validation
-        # Even if LLM says no human needed, v0.2 always requires it
+        # Even if the LLM says no human is needed, AEGIS always requires it.
         requires_human = True
 
     decision = Decision(
