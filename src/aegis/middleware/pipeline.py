@@ -33,6 +33,7 @@ from uuid import uuid4
 from aegis.llm.client import OllamaClient
 from aegis.middleware.models import (
     AegisReport,
+    AppliedResponse,
     Decision,
     EscalatedAlert,
     LlmResponse,
@@ -42,11 +43,13 @@ from aegis.middleware.models import (
 from aegis.middleware.prompt_builder import (
     build_llm_prompt,
     build_slm_prompt,
+    extract_request_path,
 )
 from aegis.middleware.risk_scorer import compute_risk_score
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
 from aegis.soar.client import ShuffleClient
+from aegis.soar.response_policy import ResponsePolicy, render_action
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +341,7 @@ async def analyze_log(
     llm_timeout: float = 45.0,
     llm_model: str = _DEFAULT_LLM_MODEL,
     use_schema: bool = False,
+    response_policies: dict[int, ResponsePolicy] | None = None,
 ) -> AegisReport | None:
     """
     Run the slow analysis stage of the AEGIS pipeline (LLM + risk + report + SOAR).
@@ -529,11 +533,31 @@ async def analyze_log(
         # Even if the LLM says no human is needed, AEGIS always requires it.
         requires_human = True
 
+    # SOAR response policy: a human may pre-define, per Wazuh rule, a containment action
+    # (a standing pre-approval). When one matches this alert's rule, record it on the
+    # report so the human is told — as a fact tied to the rule code, not the LLM — that a
+    # pre-defined response applies. An "auto" policy is dispatched without a per-incident
+    # click (auto_remediation_allowed=True); the human still receives the incident.
+    applied_response: AppliedResponse | None = None
+    policy = (response_policies or {}).get(log.rule_id)
+    if policy is not None:
+        actor = log.attacker_ip or log.source_ip
+        applied_response = AppliedResponse(
+            rule_id=log.rule_id,
+            action=render_action(
+                policy, actor=actor, host=log.source_agent, url=extract_request_path(log.full_log)
+            ),
+            auto_applied=policy.auto,
+        )
+        if policy.auto:
+            auto_remediation = True
+
     decision = Decision(
         severity=severity,
         requires_human_validation=requires_human,
         auto_remediation_allowed=auto_remediation,
         recommended_action=recommended_action,
+        applied_response=applied_response,
     )
 
     logger.debug(

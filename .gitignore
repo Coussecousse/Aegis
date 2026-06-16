@@ -54,3 +54,6 @@ docs/benchmarks/report-*.json
 
 # Local-only archives (incident history, scratch notes)
 *.local.md
+
+# Operator-local SOAR response policy (copy from the .example)
+docker/node1/response-policies.json

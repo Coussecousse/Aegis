@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-16
+
+### Added
+
+- SOAR pre-approved response policies (middleware side): a human-maintained
+  `rule_id → containment action` map with an `auto` flag, loaded from
+  `RESPONSE_POLICY_FILE` (empty by default). When an alert's Wazuh rule matches, the
+  report's `decision.applied_response` records the action (tied to the rule code, not
+  the LLM); an `auto` policy sets `auto_remediation_allowed` while keeping
+  `requires_human_validation` True. Shuffle executes the containment.
+
 ## [0.5.0] - 2026-06-16
 
 ### Added

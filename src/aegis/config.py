@@ -172,6 +172,7 @@ class Settings:
     wazuh: WazuhSettings = field(default_factory=WazuhSettings)
     suspicion_threshold: float = 0.5
     fp_gate_confidence_ceiling: float = 0.6
+    response_policy_file: str | None = None
     shuffle_webhook_url: str = "http://shuffle:3001/api/v1/hooks/"
     log_level: str = "INFO"
 
@@ -185,6 +186,7 @@ class Settings:
             wazuh=WazuhSettings.from_env(),
             suspicion_threshold=float(os.getenv("SUSPICION_THRESHOLD", "0.5")),
             fp_gate_confidence_ceiling=float(os.getenv("FP_GATE_CONFIDENCE_CEILING", "0.6")),
+            response_policy_file=os.getenv("RESPONSE_POLICY_FILE") or None,
             shuffle_webhook_url=os.getenv(
                 "SHUFFLE_WEBHOOK_URL", "http://shuffle:3001/api/v1/hooks/"
             ),

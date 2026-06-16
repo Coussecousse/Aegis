@@ -339,6 +339,24 @@ class RiskScore(BaseModel):
     )
 
 
+class AppliedResponse(BaseModel):
+    """A human pre-defined SOAR response matched to this alert's Wazuh rule.
+
+    Records, as a fact tied to the rule code (not the LLM's opinion), that a standing
+    human policy applies. ``auto_applied`` is True when the policy is pre-approved and
+    the response was dispatched automatically; False when it is pre-staged for a human
+    to confirm in Shuffle.
+    """
+
+    rule_id: int = Field(..., description="Wazuh rule whose response policy matched")
+    action: str = Field(..., description="The pre-defined containment action (rendered)")
+    auto_applied: bool = Field(
+        ...,
+        description="True = pre-approved policy dispatched automatically; "
+        "False = pre-staged, awaits human confirmation",
+    )
+
+
 class Decision(BaseModel):
     """Decision block: recommended action and required validations."""
 
@@ -356,9 +374,14 @@ class Decision(BaseModel):
     )
     auto_remediation_allowed: bool = Field(
         ...,
-        description="Automatic remediation allowed (always False — human-in-the-loop)",
+        description="Automatic remediation allowed — True only when a human pre-approved "
+        "SOAR policy matched this rule; default False (human-in-the-loop)",
     )
     recommended_action: str = Field(..., description="Recommended remediation action")
+    applied_response: AppliedResponse | None = Field(
+        default=None,
+        description="Human pre-defined SOAR response matched by Wazuh rule, or None",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
