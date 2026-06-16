@@ -17,9 +17,13 @@ without a dedicated SOC team.
 - **Sovereign** — avoids foreign jurisdiction over logs (US Cloud Act) under NIS 2 / GDPR.
 - **Human-in-the-loop** — AEGIS proposes; a human validates before anything is executed.
 
-The pipeline in one line: **Wazuh → RabbitMQ → SLM triage → ChromaDB/UEBA context →
-LLM report → Shuffle SOAR → human validation.** Details in
-[docs/middleware.md](docs/middleware.md).
+**The pipeline:**
+
+```
+Wazuh → RabbitMQ → SLM triage → ChromaDB/UEBA context → LLM report → Shuffle SOAR → human validation
+```
+
+Details in [docs/middleware.md](docs/middleware.md).
 
 ## Documentation
 
@@ -54,8 +58,12 @@ Start here — each topic has its own doc:
 | Secrets | HashiCorp Vault |
 | Runtime | Docker Engine + Compose |
 
-AEGIS runs on two nodes — a controller VM (all Docker services) and a Raspberry Pi 5
-(Ollama only). See [docs/architecture.md](docs/architecture.md).
+AEGIS runs on **two nodes**:
+
+- **Node 1** — controller VM: all Docker services (Wazuh, RabbitMQ, ChromaDB, middleware, Shuffle, Prometheus/Grafana).
+- **Node 2** — Raspberry Pi 5: Ollama only (SLM triage + LLM reports).
+
+See [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
@@ -66,15 +74,14 @@ make docker-up            # start Node 1 (core); or `make docker-up-full` with S
 make docker-ps            # wait until services are healthy
 ```
 
-Full setup (Node 2, identity connector, attack target, gotchas):
-[docs/getting-started.md](docs/getting-started.md). All commands:
-[docs/makefile.md](docs/makefile.md).
+- **Full setup** (Node 2, identity connector, attack target, gotchas) → [docs/getting-started.md](docs/getting-started.md)
+- **All `make` targets** → [docs/makefile.md](docs/makefile.md)
 
 ## Project status
 
-`v1.0.0` — first stable release (behavioral UEBA, zero-loss reliability, LLM-authored
-actions, pre-approved SOAR response policies). Active branch: `develop`; stable: `main`.
-See [CHANGELOG.md](CHANGELOG.md).
+**`v1.0.0`** — first stable release.<br>
+Behavioral UEBA · zero-loss reliability · LLM-authored actions · pre-approved SOAR response policies.<br>
+Active branch: `develop` · stable: `main` · full history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing & license
 
