@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
-from aegis.middleware.consumer_identity import RabbitMQIdentityConsumer
+from aegis.middleware.consumer_identity import IdentityProcessor
 from aegis.middleware.models import RagContext, UEBAMetrics, WazuhLog
-from aegis.middleware.pipeline import process_log
+from aegis.middleware.pipeline import analyze_log, triage_log
+from aegis.rag.ldap import LdapConfig
 
 
 class _FakeIdentityConnector:
@@ -35,19 +35,9 @@ class _MemoryChromaDBClient:
     async def get_asset_context(self, asset_identifier: str) -> RagContext:
         return self._contexts[asset_identifier]
 
-
-class _FakeMessage:
-    def __init__(self, body: bytes) -> None:
-        self.body = body
-        self.acked = False
-        self.nacked = False
-
-    async def ack(self) -> None:
-        self.acked = True
-
-    async def nack(self, requeue: bool = False) -> None:
-        _ = requeue
-        self.nacked = True
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        _ = now
+        return self._contexts[asset_identifier]
 
 
 class _FakeOllamaClient:
@@ -74,9 +64,18 @@ class _FakeOllamaClient:
             },
         }
 
-    async def generate(self, model: str, prompt: str, timeout: float) -> dict[str, Any]:
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        timeout: float,
+        keep_alive: int = 300,
+        num_predict: int | None = None,
+    ) -> dict[str, Any]:
         _ = prompt
         _ = timeout
+        _ = keep_alive
+        _ = num_predict
         return self.responses[model]
 
 
@@ -123,21 +122,33 @@ async def test_identity_sync_pipeline_applies_tier0_multiplier_and_human_gate() 
 
     connector = _FakeIdentityConnector(tier0_context)
     chroma = _MemoryChromaDBClient()
-    identity_consumer = RabbitMQIdentityConsumer()
-    identity_message = _FakeMessage(json.dumps({"asset_id": "10.0.0.10"}).encode("utf-8"))
 
-    await identity_consumer._handle_message(identity_message, chroma, connector)
+    # Drive the identity processor directly (clients injected, bypassing __aenter__).
+    identity_processor = IdentityProcessor(
+        ldap_config=LdapConfig(host="x", base_dn="dc=x", bind_dn="", bind_password="")
+    )
+    identity_processor._chroma = chroma  # type: ignore[assignment]  # noqa: SLF001
+    identity_processor._connector = connector  # type: ignore[assignment]  # noqa: SLF001
 
-    assert identity_message.acked is True
-    assert identity_message.nacked is False
+    async def _publish(routing_key: str, body: bytes) -> None:  # pragma: no cover
+        raise AssertionError("identity stage must not publish")
+
+    await identity_processor.process({"asset_id": "10.0.0.10"}, _publish)
+    assert "10.0.0.10" in chroma._contexts  # noqa: SLF001
 
     ollama = _FakeOllamaClient()
     shuffle = _FakeShuffleClient()
 
-    report = await process_log(
+    escalated = await triage_log(
         log=_make_log(),
         ollama_client=ollama,
         chromadb_client=chroma,
+    )
+    assert escalated is not None
+
+    report = await analyze_log(
+        escalated=escalated,
+        ollama_client=ollama,
         shuffle_client=shuffle,
     )
 

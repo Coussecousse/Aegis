@@ -144,17 +144,27 @@ class TestSlmResponse:
             )
         assert "confidence" in str(exc_info.value)
 
-    def test_invalid_behavior_category(self) -> None:
-        """Test that invalid behavior_category raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
-            SlmResponse(
-                is_suspect=True,
-                confidence=0.75,
-                behavior_category="invalid_category",  # Invalid enum value
-                reasoning_short="Test",
-                raw_probabilities={"suspect": 0.75, "benign": 0.25},
-            )
-        assert "behavior_category" in str(exc_info.value)
+    def test_invalid_behavior_category_falls_back_to_normal(self) -> None:
+        """Unrecognisable categories are normalised to 'normal' (no match above cutoff)."""
+        slm = SlmResponse(
+            is_suspect=True,
+            confidence=0.75,
+            behavior_category="totally_unknown_xyz",
+            reasoning_short="Test",
+            raw_probabilities={"suspect": 0.75, "benign": 0.25},
+        )
+        assert slm.behavior_category == "normal"
+
+    def test_behavior_category_typo_is_fuzzy_matched(self) -> None:
+        """Typos close to a valid category are corrected (e.g. TinyLlama spelling errors)."""
+        slm = SlmResponse(
+            is_suspect=True,
+            confidence=0.85,
+            behavior_category="privilege_escalaion",  # real typo from tinyllama-aegis
+            reasoning_short="Test",
+            raw_probabilities={"suspect": 0.85, "benign": 0.15},
+        )
+        assert slm.behavior_category == "privilege_escalation"
 
     def test_valid_behavior_categories(self) -> None:
         """Test all valid behavior_category enum values."""

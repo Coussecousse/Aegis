@@ -31,6 +31,12 @@ class MetricsCollector:
             "aegis_pipeline_duration_seconds",
             "Pipeline and stage durations in seconds",
             labelnames=("stage",),
+            # Default buckets top out at 10s (web-latency scale). The "llm" and
+            # "total" stages routinely take minutes (Mistral 7B inference on
+            # constrained hardware) — every observation would otherwise land in
+            # the +Inf bucket, and histogram_quantile would report that bucket's
+            # lower edge (10) as a false ceiling instead of the real percentile.
+            buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 900, 1200),
             registry=self._registry,
         )
         self.danger_score = Gauge(
@@ -44,6 +50,16 @@ class MetricsCollector:
         """Record one processed alert and end-to-end duration."""
         self.alerts_processed.labels(status=status, severity=severity).inc()
         self.pipeline_duration.labels(stage="total").observe(duration_s)
+
+    def record_triage(self, duration_s: float) -> None:
+        """Record triage_log() duration — the MTTT (Mean Time To Triage) signal.
+
+        Observed on every triage_log() exit path (suspicion-gate discard, RAG
+        error, UEBA-gate discard, and escalation), so MTTT reflects all
+        alerts entering the pipeline, not only the subset escalated to
+        analyze_log().
+        """
+        self.pipeline_duration.labels(stage="triage").observe(duration_s)
 
     def record_slm(self, duration_s: float) -> None:
         """Record SLM stage duration."""

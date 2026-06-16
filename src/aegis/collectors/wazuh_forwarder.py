@@ -7,13 +7,13 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
 from uuid import uuid4
 
 import aio_pika
 from aio_pika.abc import AbstractChannel, AbstractExchange, AbstractRobustConnection
 from pydantic import ValidationError
 
+from aegis.config import build_amqp_url
 from aegis.middleware.models import WazuhLog
 
 logger = logging.getLogger(__name__)
@@ -23,12 +23,21 @@ class WazuhAlertParser:
     """Parse raw Wazuh alert payloads into validated ``WazuhLog`` models."""
 
     @staticmethod
-    def parse_alert(payload: dict[str, Any], min_level: int = 7) -> WazuhLog | None:
+    def parse_alert(
+        payload: dict[str, Any],
+        min_level: int = 7,
+        excluded_rules: frozenset[int] = frozenset(),
+    ) -> WazuhLog | None:
         """Map a Wazuh JSON alert into a validated ``WazuhLog`` instance.
 
         Args:
             payload: Raw Wazuh alert JSON object.
             min_level: Minimum ``rule.level`` required to forward the alert.
+            excluded_rules: Rule ids to drop as known noise (e.g. host
+                self-monitoring like netstat port changes). Filtering by rule —
+                not by agent — because a single Wazuh agent here covers both the
+                AEGIS infra host and the monitored targets, so excluding the
+                agent would blind real detections.
 
         Returns:
             ``WazuhLog`` when mapping succeeds and threshold is met, otherwise ``None``.
@@ -53,6 +62,11 @@ class WazuhAlertParser:
         if not isinstance(source_ip_raw, str) or not source_ip_raw:
             source_ip_raw = WazuhAlertParser._read_nested_string(payload, "data", "srcip")
 
+        # Real actor IP: data.srcip is the remote client (e.g. a web attacker), distinct
+        # from the agent host IP. Surface it so the report cites the attacker, not the host.
+        data_srcip = WazuhAlertParser._read_nested_string(payload, "data", "srcip")
+        attacker_ip = data_srcip if data_srcip and data_srcip != source_ip_raw else None
+
         full_log = payload.get("full_log")
 
         if (
@@ -72,6 +86,25 @@ class WazuhAlertParser:
         if rule_level < min_level:
             return None
 
+        # Docker's own networking activity: dockerd legitimately enables
+        # promiscuous mode on veth interfaces when creating container networks
+        # (rule 80710). The auditd `comm="dockerd"` signature in the log itself
+        # — not the agent or the rule alone — is what distinguishes this from a
+        # genuine sniffing attempt, so detection stays intact for every other
+        # process, device, and host.
+        if rule_id == 80710 and 'comm="dockerd"' in full_log:
+            return None
+
+        # Wazuh operational rules: agent lifecycle events, not security alerts
+        _operational_rules = {501, 502, 503, 510, 511, 512, 513}
+        if rule_id in _operational_rules:
+            return None
+
+        # Operator-configured noise (e.g. infra host self-monitoring): drop early
+        # so it never consumes an LLM analysis cycle.
+        if rule_id in excluded_rules:
+            return None
+
         mitre_technique = WazuhAlertParser._extract_mitre_technique(payload)
         decoder_name = WazuhAlertParser._read_nested_string(payload, "decoder", "name")
 
@@ -84,6 +117,7 @@ class WazuhAlertParser:
                 rule_description=rule_description,
                 source_agent=source_agent,
                 source_ip=source_ip_raw,
+                attacker_ip=attacker_ip,
                 full_log=full_log,
                 decoder_name=decoder_name,
                 mitre_technique=mitre_technique,
@@ -156,6 +190,7 @@ class WazuhForwarder:
     exchange_name: str = "aegis.alerts"
     routing_key: str = "alert.raw"
     min_level: int = 7
+    excluded_rules: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
         """Initialize non-dataclass runtime attributes."""
@@ -165,12 +200,12 @@ class WazuhForwarder:
 
     async def connect(self) -> None:
         """Establish RabbitMQ connection and resolve destination exchange."""
-        encoded_user = quote(self.rabbitmq_user or "", safe="")
-        encoded_password = quote(self.rabbitmq_password or "", safe="")
-        encoded_vhost = quote(self.rabbitmq_vhost or "/", safe="")
-        connection_url = (
-            f"amqp://{encoded_user}:{encoded_password}"
-            f"@{self.rabbitmq_host}:{self.rabbitmq_port}/{encoded_vhost}"
+        connection_url = build_amqp_url(
+            self.rabbitmq_host,
+            self.rabbitmq_port,
+            self.rabbitmq_user,
+            self.rabbitmq_password,
+            self.rabbitmq_vhost,
         )
 
         self._connection = await aio_pika.connect_robust(connection_url)
@@ -194,7 +229,9 @@ class WazuhForwarder:
         Returns:
             ``True`` when a message was published, ``False`` when skipped or invalid.
         """
-        parsed = WazuhAlertParser.parse_alert(payload, min_level=self.min_level)
+        parsed = WazuhAlertParser.parse_alert(
+            payload, min_level=self.min_level, excluded_rules=self.excluded_rules
+        )
         if parsed is None:
             return False
 
@@ -202,7 +239,11 @@ class WazuhForwarder:
             raise RuntimeError("WazuhForwarder is not connected")
 
         body = json.dumps(parsed.model_dump(mode="json")).encode("utf-8")
-        message = aio_pika.Message(body=body, content_type="application/json")
+        message = aio_pika.Message(
+            body=body,
+            content_type="application/json",
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        )
         await self._exchange.publish(message, routing_key=self.routing_key)
         logger.debug(
             "Forwarded Wazuh alert rule_id=%s level=%s source_ip=%s",

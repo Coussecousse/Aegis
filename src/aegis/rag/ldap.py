@@ -16,14 +16,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LdapConfig:
-    """Configuration for LDAPS identity extraction.
+    """Configuration for LDAP/LDAPS identity extraction.
 
     Args:
         host: LDAP server hostname.
         base_dn: LDAP search base DN.
         bind_dn: LDAP bind DN for the read-only service account.
         bind_password: LDAP bind password.
-        port: LDAPS port.
+        port: LDAP port. Defaults to 636 when use_ssl=True, 389 otherwise.
+        use_ssl: Enable LDAPS (TLS). Set to False for plain LDAP (POC/dev).
         timeout: Connection and query timeout in seconds.
         tier0_group_dn: Full DN of the group considered Tier 0 (Domain Admins).
             Override this for environments that differ from the default domain.
@@ -33,9 +34,15 @@ class LdapConfig:
     base_dn: str
     bind_dn: str
     bind_password: str
-    port: int = 636
+    use_ssl: bool = True
+    port: int = 0
     timeout: float = 5.0
     tier0_group_dn: str = "CN=Domain Admins,CN=Users,DC=aerotech,DC=local"
+
+    def __post_init__(self) -> None:
+        """Set default port based on use_ssl when port is unset."""
+        if self.port == 0:
+            object.__setattr__(self, "port", 636 if self.use_ssl else 389)
 
 
 class LdapConnector(BaseIdentityConnector):
@@ -93,47 +100,68 @@ class LdapConnector(BaseIdentityConnector):
         server = ldap3_module.Server(
             self.config.host,
             port=self.config.port,
-            use_ssl=True,
+            use_ssl=self.config.use_ssl,
             connect_timeout=self.config.timeout,
+            get_info=ldap3_module.NONE,
         )
 
         connection = ldap3_module.Connection(
             server,
             user=self.config.bind_dn,
             password=self.config.bind_password,
-            auto_bind=True,
-            receive_timeout=self.config.timeout,
+            auto_bind=ldap3_module.AUTO_BIND_NO_TLS,
+            receive_timeout=int(self.config.timeout),
             read_only=True,
+            raise_exceptions=False,
         )
 
-        search_filter = (
-            "(|"
-            f"(sAMAccountName={asset_identifier})"
+        # AD-style filter with sAMAccountName; falls back to cn-only for plain LDAP.
+        ad_filter = (
+            f"(|(sAMAccountName={asset_identifier})"
             f"(dNSHostName={asset_identifier})"
-            f"(cn={asset_identifier})"
-            ")"
+            f"(cn={asset_identifier}))"
         )
+        fallback_filter = f"(cn={asset_identifier})"
 
-        try:
-            found = connection.search(
+        found = connection.search(
+            search_base=self.config.base_dn,
+            search_filter=ad_filter,
+            attributes=ldap3_module.ALL_ATTRIBUTES,
+            size_limit=1,
+        )
+        if not found and connection.result.get("description") == "invalidAttributeSyntax":
+            connection.search(
                 search_base=self.config.base_dn,
-                search_filter=search_filter,
-                attributes=["distinguishedName", "memberOf", "sAMAccountName"],
+                search_filter=fallback_filter,
+                attributes=ldap3_module.ALL_ATTRIBUTES,
                 size_limit=1,
             )
-        except Exception as exc:
-            connection.unbind()
-            raise ConnectionError("LDAPS search failed") from exc
 
-        if not found or not connection.entries:
+        if not connection.entries:
             connection.unbind()
             return self._default_context(asset_identifier)
 
         entry = connection.entries[0]
 
-        distinguished_name = self._extract_scalar_attribute(entry, "distinguishedName")
-        account_name = self._extract_scalar_attribute(entry, "sAMAccountName")
+        distinguished_name = getattr(entry, "entry_dn", None) or self._extract_scalar_attribute(
+            entry, "distinguishedName"
+        )
+        account_name = self._extract_scalar_attribute(
+            entry, "sAMAccountName"
+        ) or self._extract_scalar_attribute(entry, "cn")
+        # memberOf is an operational attribute absent from plain OpenLDAP; fall back to a
+        # reverse membership lookup against the tier0 group using the BASE scope.
         groups = self._extract_list_attribute(entry, "memberOf")
+        if not groups and distinguished_name:
+            connection.search(
+                search_base=self.config.tier0_group_dn,
+                search_filter=f"(member={distinguished_name})",
+                search_scope=ldap3_module.BASE,
+                attributes=[],
+                size_limit=1,
+            )
+            if connection.entries:
+                groups = [self.config.tier0_group_dn]
 
         connection.unbind()
 
@@ -154,7 +182,12 @@ class LdapConnector(BaseIdentityConnector):
                 associated_users=[account_name] if account_name else [],
                 normal_activity_window="Unknown",
                 recent_anomalies=groups,
-                anomaly_score=1.0 if criticality == "tier0" else 0.3,
+                # Privilege is carried by asset_criticality (tier) + the risk scorer's
+                # criticality multiplier — NOT by anomaly_score. anomaly_score is a
+                # purely behavioral signal that accrues from observed activity
+                # (see aegis.rag.ueba / ChromaDBClient.record_activity), so a freshly
+                # synced asset starts at 0.0 until its behavior says otherwise.
+                anomaly_score=0.0,
             ),
         )
 

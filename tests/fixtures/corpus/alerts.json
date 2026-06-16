@@ -1,0 +1,125 @@
+{
+  "A-scan-multi-400": {
+    "timestamp": "2026-06-14T09:00:01.000+0000",
+    "rule": {"id": "31151", "level": 10, "description": "Multiple web server 400 error codes from same source ip."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "172.18.0.50"},
+    "full_log": "172.18.0.50 - - [14/Jun/2026:09:00:01 +0000] \"GET /admin HTTP/1.1\" 404 153 \"-\" \"Mozilla/5.00 (Nikto/2.1.6)\"",
+    "decoder": {"name": "web-accesslog"}
+  },
+  "B-sqli-union": {
+    "timestamp": "2026-06-14T09:01:00.000+0000",
+    "rule": {"id": "31103", "level": 7, "description": "SQL injection attempt."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "172.18.0.7"},
+    "full_log": "172.18.0.7 - - [14/Jun/2026:09:01:00 +0000] \"GET /rest/products/search?q=test%27%20UNION%20SELECT%20username,password%20FROM%20Users-- HTTP/1.1\" 500 994 \"-\" \"sqlmap/1.7\"",
+    "mitre": {"technique": ["SQL Injection"], "id": ["T1190"]},
+    "decoder": {"name": "web-accesslog"}
+  },
+  "B2-sqli-frequency": {
+    "timestamp": "2026-06-14T09:02:00.000+0000",
+    "rule": {"id": "31152", "level": 10, "description": "Multiple SQL injection attempts from same source ip."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "172.18.0.7"},
+    "full_log": "172.18.0.7 - - [14/Jun/2026:09:02:00 +0000] \"GET /rest/products/search?q=1%27%20OR%20%271%27=%271 HTTP/1.1\" 500 994 \"-\" \"sqlmap/1.7\"",
+    "mitre": {"technique": ["Process Injection"], "id": ["T1055"]},
+    "decoder": {"name": "web-accesslog"}
+  },
+  "C-xss": {
+    "timestamp": "2026-06-14T09:03:00.000+0000",
+    "rule": {"id": "31154", "level": 10, "description": "Multiple XSS (Cross Site Scripting) attempts from same source ip."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "172.18.0.9"},
+    "full_log": "172.18.0.9 - - [14/Jun/2026:09:03:00 +0000] \"GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\" 200 512 \"-\" \"curl/8.5.0\"",
+    "mitre": {"technique": ["Command and Scripting Interpreter"], "id": ["T1059"]},
+    "decoder": {"name": "web-accesslog"}
+  },
+  "D-path-traversal": {
+    "timestamp": "2026-06-14T09:04:00.000+0000",
+    "rule": {"id": "31153", "level": 10, "description": "Multiple common web attacks from same source ip."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "192.168.1.15"},
+    "full_log": "192.168.1.15 - - [14/Jun/2026:09:04:00 +0000] \"GET /iisadmpwd/..%c0%af../winnt/system32/cmd.exe?/c+dir HTTP/1.1\" 404 230 \"-\" \"curl/8.5.0\"",
+    "mitre": {"technique": ["File and Directory Discovery"], "id": ["T1083"]},
+    "decoder": {"name": "web-accesslog"}
+  },
+  "E-command-injection": {
+    "timestamp": "2026-06-14T09:05:00.000+0000",
+    "rule": {"id": "31103", "level": 7, "description": "SQL injection attempt."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "172.18.0.11"},
+    "full_log": "172.18.0.11 - - [14/Jun/2026:09:05:00 +0000] \"GET /api/run?cmd=ls%3Bid HTTP/1.1\" 500 88 \"-\" \"curl/8.5.0\"",
+    "decoder": {"name": "web-accesslog"}
+  },
+  "F-ssh-bruteforce": {
+    "timestamp": "2026-06-14T09:06:00.000+0000",
+    "rule": {"id": "5710", "level": 10, "description": "sshd: Multiple authentication failures."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "data": {"srcip": "10.0.0.50"},
+    "full_log": "Jun 14 09:06:00 node1 sshd[2211]: Failed password for root from 10.0.0.50 port 51514 ssh2",
+    "mitre": {"technique": ["Brute Force"], "id": ["T1110"]},
+    "decoder": {"name": "sshd"}
+  },
+  "I1-netstat-noise": {
+    "timestamp": "2026-06-14T09:07:00.000+0000",
+    "rule": {"id": "533", "level": 7, "description": "Listened ports status (netstat) changed (new port opened or closed)."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "full_log": "ossec: output: 'netstat listening ports': tcp 0.0.0.0:44703",
+    "decoder": {"name": "ossec"}
+  },
+  "I2-dockerd-promiscuous": {
+    "timestamp": "2026-06-14T09:08:00.000+0000",
+    "rule": {"id": "80710", "level": 10, "description": "Auditd: Device enables promiscuous mode."},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"},
+    "full_log": "type=ANOM_PROMISCUOUS msg=audit(1781000000.000:111): dev=veth9c3 prom=256 old_prom=0 auid=4294967295 uid=0 comm=\"dockerd\" exe=\"/usr/bin/dockerd\"",
+    "decoder": {"name": "auditd"}
+  },
+  "J-100001-ad-bruteforce": {
+    "timestamp": "2026-06-14T09:10:00.000+0000",
+    "rule": {"id": "100001", "level": 10, "description": "Multiple AD authentication failures in 60s."},
+    "agent": {"id": "002", "name": "DC-AEROTECH-01", "ip": "10.0.0.10"},
+    "data": {"srcip": "10.0.0.88"},
+    "full_log": "{\"win\":{\"system\":{\"eventID\":\"4625\"},\"eventdata\":{\"ipAddress\":\"10.0.0.88\",\"targetUserName\":\"j.dupont\"}}}",
+    "mitre": {"technique": ["Brute Force"], "id": ["T1110"]},
+    "decoder": {"name": "windows-eventlog"}
+  },
+  "J-100005-tier0-on-tier2": {
+    "timestamp": "2026-06-14T09:11:00.000+0000",
+    "rule": {"id": "100005", "level": 15, "description": "Tier 0 account used on a Tier 2 workstation."},
+    "agent": {"id": "003", "name": "WS-FACTORY-12", "ip": "10.0.2.12"},
+    "data": {"srcip": "10.0.2.12"},
+    "full_log": "{\"win\":{\"system\":{\"eventID\":\"4624\"},\"eventdata\":{\"targetUserName\":\"domain_admin\",\"workstationName\":\"WS-FACTORY-12\"}}}",
+    "mitre": {"technique": ["Valid Accounts"], "id": ["T1078"]},
+    "decoder": {"name": "windows-eventlog"}
+  },
+  "J-100011-ransomware-ext": {
+    "timestamp": "2026-06-14T09:12:00.000+0000",
+    "rule": {"id": "100011", "level": 15, "description": "Ransomware extension detected."},
+    "agent": {"id": "004", "name": "NAS-ENG-01", "ip": "10.0.3.5"},
+    "full_log": "File created: /srv/nas/engineering/plans.dwg.locked by uid=1007",
+    "mitre": {"technique": ["Data Encrypted for Impact"], "id": ["T1486"]},
+    "decoder": {"name": "syscheck"}
+  },
+  "J-100031-agent-tampering": {
+    "timestamp": "2026-06-14T09:13:00.000+0000",
+    "rule": {"id": "100031", "level": 15, "description": "Wazuh agent disconnected/tampering."},
+    "agent": {"id": "003", "name": "WS-FACTORY-12", "ip": "10.0.2.12"},
+    "full_log": "ossec: Agent disconnected: 'WS-FACTORY-12->10.0.2.12'",
+    "mitre": {"technique": ["Impair Defenses"], "id": ["T1562"]},
+    "decoder": {"name": "ossec"}
+  },
+  "J-100041-c2-outbound": {
+    "timestamp": "2026-06-14T09:14:00.000+0000",
+    "rule": {"id": "100041", "level": 13, "description": "Server outbound traffic to an unknown external IP (C2)."},
+    "agent": {"id": "005", "name": "APP-ERP-01", "ip": "10.0.4.20"},
+    "data": {"srcip": "10.0.4.20", "dstip": "203.0.113.66"},
+    "full_log": "connection: 10.0.4.20:50112 -> 203.0.113.66:443 proc=svchost.exe bytes=20480",
+    "mitre": {"technique": ["Application Layer Protocol"], "id": ["T1071"]},
+    "decoder": {"name": "firewall"}
+  },
+  "K-poison-missing-fields": {
+    "timestamp": "2026-06-14T09:15:00.000+0000",
+    "rule": {"id": "31103", "level": 7},
+    "agent": {"id": "001", "name": "node1-host", "ip": "127.0.0.1"}
+  }
+}

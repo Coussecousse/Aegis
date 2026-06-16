@@ -1,14 +1,17 @@
 """Async ChromaDB client for AEGIS RAG asset enrichment."""
 
+import asyncio
 import importlib
 import inspect
 import json
 import logging
+import time
 from typing import Any, Literal, cast
 
 import httpx
 
 from aegis.middleware.models import RagContext, UEBAMetrics
+from aegis.rag import ueba
 from aegis.rag.base import BaseIdentityConnector
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,7 @@ class ChromaDBClient:
         self._client: Any | None = None
         self._collection: Any | None = None
         self._collection_name = "aegis_assets"
+        self._sync_mode = False
         logger.info(f"ChromaDB client initialized: {host}:{port}")
 
     async def __aenter__(self) -> "ChromaDBClient":
@@ -54,19 +58,29 @@ class ChromaDBClient:
         if self._client is None:
             chromadb_module = _get_chromadb_module()
             async_http_client = getattr(chromadb_module, "AsyncHttpClient", None)
-            if async_http_client is None:
-                raise RuntimeError("chromadb.AsyncHttpClient is unavailable")
-            self._client = await self._maybe_await(
-                async_http_client(
+            if async_http_client is not None:
+                self._client = await self._maybe_await(
+                    async_http_client(
+                        host=self.host,
+                        port=self.port,
+                    )
+                )
+            else:
+                http_client = getattr(chromadb_module, "HttpClient", None)
+                if http_client is None:
+                    raise RuntimeError(
+                        "chromadb client is unavailable "
+                        "(neither AsyncHttpClient nor HttpClient found)"
+                    )
+                self._sync_mode = True
+                self._client = http_client(
                     host=self.host,
                     port=self.port,
                 )
-            )
 
-        self._collection = await self._maybe_await(
-            self._client.get_or_create_collection(
-                name=self._collection_name,
-            )
+        self._collection = await self._call(
+            self._client.get_or_create_collection,
+            name=self._collection_name,
         )
         return self._collection
 
@@ -81,7 +95,7 @@ class ChromaDBClient:
         """
         try:
             collection = await self._ensure_collection()
-            results = await self._maybe_await(collection.get(ids=[asset_identifier]))
+            results = await self._call(collection.get, ids=[asset_identifier])
             metadatas = results.get("metadatas", []) if isinstance(results, dict) else []
 
             if not metadatas:
@@ -106,6 +120,55 @@ class ChromaDBClient:
             return self._create_default_context(asset_identifier)
         except Exception:
             logger.exception("Unexpected ChromaDB error while fetching asset context")
+            return self._create_default_context(asset_identifier)
+
+    async def record_activity(self, asset_identifier: str, now: float | None = None) -> RagContext:
+        """Record one activity event for an asset and recompute its behavioral score.
+
+        Updates the trailing event window + EWMA baseline persisted in ChromaDB
+        (Gap 2 behavioral UEBA) and returns the asset context with a fresh
+        ``anomaly_score`` reflecting how far recent activity deviates from the
+        asset's own baseline. For an **unprofiled** asset (not in ChromaDB) this
+        is a no-op returning the tier2 default — behavioral baselines only apply
+        to known assets; an unprofiled one still fails open in triage.
+
+        Args:
+            asset_identifier: Asset identifier (hostname, id, or IP).
+            now: Event timestamp (epoch seconds); defaults to the current time.
+
+        Returns:
+            RagContext: Context with the recomputed behavioral anomaly score, or
+            the tier2 fallback for an unknown/erroring asset.
+        """
+        ts_now = time.time() if now is None else now
+        try:
+            collection = await self._ensure_collection()
+            results = await self._call(collection.get, ids=[asset_identifier])
+            metadatas = results.get("metadatas", []) if isinstance(results, dict) else []
+            metadata = metadatas[0] if isinstance(metadatas, list) and metadatas else None
+            if not isinstance(metadata, dict):
+                return self._create_default_context(asset_identifier)
+
+            meta = dict(cast(dict[str, Any], metadata))
+            window = ueba.prune_window(
+                self._parse_float_list(meta.get("event_timestamps", "[]")), ts_now
+            )
+            window.append(ts_now)
+            recent_count = len(window)
+            baseline = float(meta.get("baseline_rate", 1.0) or 1.0)
+
+            meta["anomaly_score"] = str(ueba.anomaly_score(recent_count, baseline))
+            meta["baseline_rate"] = str(ueba.update_baseline(baseline, recent_count))
+            meta["event_timestamps"] = json.dumps(window)
+
+            await self._call(
+                collection.upsert, ids=[asset_identifier], metadatas=[meta], embeddings=[[0.0]]
+            )
+            return self._context_from_metadata(asset_identifier, meta)
+        except (httpx.TimeoutException, TimeoutError):
+            return self._create_default_context(asset_identifier)
+        except Exception:
+            logger.exception("Failed to record activity for behavioral UEBA")
             return self._create_default_context(asset_identifier)
 
     def _context_from_metadata(self, asset_identifier: str, metadata: dict[str, Any]) -> RagContext:
@@ -148,6 +211,7 @@ class ChromaDBClient:
         anomaly_score_raw = metadata.get("anomaly_score", 0.0)
         baseline_description = str(metadata.get("baseline_description", "No baseline"))
         normal_activity_window = str(metadata.get("normal_activity_window", "Unknown"))
+        has_baseline = True
 
         if (
             "baseline_description" not in metadata
@@ -162,14 +226,36 @@ class ChromaDBClient:
             normal_activity_window = "Unknown"
             recent_anomalies = []
             anomaly_score_raw = 0.0
+            has_baseline = False
 
         return UEBAMetrics(
+            has_baseline=has_baseline,
             baseline_description=baseline_description,
             associated_users=associated_users,
             normal_activity_window=normal_activity_window,
             recent_anomalies=recent_anomalies,
             anomaly_score=float(anomaly_score_raw),
         )
+
+    @staticmethod
+    def _parse_float_list(value: Any) -> list[float]:
+        """Parse a metadata list of floats from a JSON string or native list."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return []
+        elif isinstance(value, list):
+            parsed = value
+        else:
+            return []
+        out: list[float] = []
+        for item in parsed if isinstance(parsed, list) else []:
+            try:
+                out.append(float(item))
+            except (TypeError, ValueError):
+                continue
+        return out
 
     @staticmethod
     def _parse_string_list(value: Any) -> list[str]:
@@ -195,6 +281,7 @@ class ChromaDBClient:
             asset_description="Unknown asset - no metadata found in ChromaDB",
             similar_incidents=[],
             ueba=UEBAMetrics(
+                has_baseline=False,
                 baseline_description="No baseline",
                 associated_users=[],
                 normal_activity_window="Unknown",
@@ -202,14 +289,6 @@ class ChromaDBClient:
                 anomaly_score=0.0,
             ),
         )
-
-    async def get_asset_context_by_ip(self, ip_address: str) -> RagContext:
-        """Retrieve asset context by IP address."""
-        return await self.get_asset_context(ip_address)
-
-    async def get_asset_context_by_name(self, asset_name: str) -> RagContext:
-        """Retrieve asset context by asset name."""
-        return await self.get_asset_context(asset_name)
 
     async def index_asset(self, context: RagContext) -> bool:
         """Upsert an asset into ChromaDB metadata collection.
@@ -222,24 +301,22 @@ class ChromaDBClient:
         """
         try:
             collection = await self._ensure_collection()
-            await self._maybe_await(
-                collection.upsert(
-                    ids=[context.asset_name],
-                    metadatas=[
-                        {
-                            "asset_name": context.asset_name,
-                            "asset_criticality": context.asset_criticality,
-                            "asset_description": context.asset_description,
-                            "similar_incidents": json.dumps(context.similar_incidents),
-                            "baseline_description": context.ueba.baseline_description,
-                            "associated_users": json.dumps(context.ueba.associated_users),
-                            "normal_activity_window": context.ueba.normal_activity_window,
-                            "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
-                            "anomaly_score": str(context.ueba.anomaly_score),
-                        }
-                    ],
-                    documents=[context.asset_description],
-                )
+            metadata = {
+                "asset_name": context.asset_name,
+                "asset_criticality": context.asset_criticality,
+                "asset_description": context.asset_description,
+                "similar_incidents": json.dumps(context.similar_incidents),
+                "baseline_description": context.ueba.baseline_description,
+                "associated_users": json.dumps(context.ueba.associated_users),
+                "normal_activity_window": context.ueba.normal_activity_window,
+                "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                "anomaly_score": str(context.ueba.anomaly_score),
+            }
+            await self._call(
+                collection.upsert,
+                ids=[context.asset_name],
+                metadatas=[metadata],
+                embeddings=[[0.0]],
             )
             return True
         except Exception:
@@ -267,55 +344,43 @@ class ChromaDBClient:
 
         try:
             collection = await self._ensure_collection()
-            await self._maybe_await(
-                collection.upsert(
-                    ids=[asset_id],
-                    metadatas=[
-                        {
-                            "asset_name": context.asset_name,
-                            "asset_criticality": context.asset_criticality,
-                            "asset_description": context.asset_description,
-                            "identity_asset_id": asset_id,
-                            "similar_incidents": json.dumps(context.similar_incidents),
-                            "baseline_description": context.ueba.baseline_description,
-                            "associated_users": json.dumps(context.ueba.associated_users),
-                            "normal_activity_window": context.ueba.normal_activity_window,
-                            "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
-                            "anomaly_score": str(context.ueba.anomaly_score),
-                        }
-                    ],
-                    documents=[context.asset_description],
-                )
+            metadata = {
+                "asset_name": context.asset_name,
+                "asset_criticality": context.asset_criticality,
+                "asset_description": context.asset_description,
+                "identity_asset_id": asset_id,
+                "similar_incidents": json.dumps(context.similar_incidents),
+                "baseline_description": context.ueba.baseline_description,
+                "associated_users": json.dumps(context.ueba.associated_users),
+                "normal_activity_window": context.ueba.normal_activity_window,
+                "recent_anomalies": json.dumps(context.ueba.recent_anomalies),
+                "anomaly_score": str(context.ueba.anomaly_score),
+            }
+            await self._call(
+                collection.upsert,
+                ids=[asset_id],
+                metadatas=[metadata],
+                embeddings=[[0.0]],
             )
             return True
         except Exception:
             logger.exception("Failed to sync identity context into ChromaDB")
             return False
 
-    async def get_similar_incidents(self, asset_name: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Return similar incidents for an asset.
-
-        This minimal implementation keeps backward compatibility for callers.
-
-        Args:
-            asset_name: Asset name to query.
-            limit: Maximum incident count.
-
-        Returns:
-            list[dict[str, Any]]: Incident summaries.
-        """
-        _ = asset_name
-        _ = limit
-        return []
-
     async def close(self) -> None:
         """Close ChromaDB async resources when supported by the client implementation."""
         if self._client is not None:
             close_method = getattr(self._client, "close", None)
             if callable(close_method):
-                await self._maybe_await(close_method())
+                await self._call(close_method)
             self._client = None
             self._collection = None
+
+    async def _call(self, fn: Any, /, **kwargs: Any) -> Any:
+        """Call a ChromaDB method via asyncio.to_thread in sync mode, _maybe_await otherwise."""
+        if self._sync_mode:
+            return await asyncio.to_thread(fn, **kwargs)
+        return await self._maybe_await(fn(**kwargs))
 
     @staticmethod
     async def _maybe_await(value: Any) -> Any:

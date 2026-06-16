@@ -85,10 +85,10 @@ class TestComputeRiskScore:
             asset_criticality="tier1",
         )
 
-        # Formula: (0.65*0.30 + 0.70*0.50 + (9/15)*0.20) * 1.2
-        # = (0.195 + 0.35 + 0.12) * 1.2
-        # = 0.665 * 1.2 = 0.798 → ~0.798
-        assert 0.79 <= risk_score.danger_score <= 0.81
+        # Formula: (0.65*0.30 + 0.70*0.50 + (9/15)*0.20) * 1.2 * ueba_factor(0.5)
+        # = (0.195 + 0.35 + 0.12) * 1.2 * 0.85
+        # = 0.665 * 1.2 * 0.85 = 0.678
+        assert 0.67 <= risk_score.danger_score <= 0.69
         assert risk_score.uncertainty == "low"  # |0.65 - 0.70| = 0.05 < 0.1
         assert risk_score.score_breakdown["criticality_multiplier"] == 1.2
 
@@ -121,10 +121,9 @@ class TestComputeRiskScore:
             asset_criticality="tier2",
         )
 
-        # Formula: (0.45*0.30 + 0.40*0.50 + (3/15)*0.20) * 1.0
-        # = (0.135 + 0.20 + 0.04) * 1.0
-        # = 0.375
-        assert 0.37 <= risk_score.danger_score <= 0.38
+        # Formula: (0.45*0.30 + 0.40*0.50 + (3/15)*0.20) * 1.0 * ueba_factor(0.5)
+        # = 0.375 * 0.85 = 0.319
+        assert 0.31 <= risk_score.danger_score <= 0.33
         assert risk_score.uncertainty == "low"  # |0.45 - 0.40| = 0.05 < 0.1
         assert risk_score.score_breakdown["criticality_multiplier"] == 1.0
 
@@ -146,11 +145,9 @@ class TestComputeRiskScore:
             asset_criticality="tier0",
         )
 
-        # Formula: (0.75*0.30 + 0.75*0.50 + (12/15)*0.20) * 1.5
-        # (uses SLM confidence for LLM contribution)
-        # = (0.225 + 0.375 + 0.16) * 1.5
-        # = 0.76 * 1.5 = 1.14 → clamped to 1.0
-        assert risk_score.danger_score == 1.0
+        # Formula: (0.75*0.30 + 0.75*0.50 + (12/15)*0.20) * 1.5 * ueba_factor(0.5)
+        # = 0.76 * 1.5 * 0.85 = 0.969
+        assert 0.96 <= risk_score.danger_score <= 0.98
         assert risk_score.uncertainty == "low"  # |0.75 - 0.75| = 0.0
 
     def test_uncertainty_low(self) -> None:
@@ -368,3 +365,59 @@ class TestCategorizeUncertainty:
         assert _categorize_uncertainty(0.25) == "high"
         assert _categorize_uncertainty(0.5) == "high"
         assert _categorize_uncertainty(1.0) == "high"
+
+
+def _suspect_pair() -> tuple[SlmResponse, LlmResponse]:
+    """A confirmed-attack SLM/LLM pair for UEBA-factor tests."""
+    slm = SlmResponse(
+        is_suspect=True,
+        confidence=0.85,
+        behavior_category="normal",
+        reasoning_short="SQLi probe",
+        raw_probabilities={"suspect": 0.85, "benign": 0.15},
+    )
+    llm = LlmResponse(
+        attack_confirmed=True,
+        confidence=1.0,
+        attack_type="SQL injection",
+        severity="high",
+        affected_asset="node1-host",
+        asset_criticality="tier2",
+        plain_language_summary="Confirmed SQLi.",
+        recommended_action="Block the IP.",
+        requires_human_validation=True,
+        raw_probabilities={"attack": 1.0, "false_positive": 0.0},
+    )
+    return slm, llm
+
+
+def test_no_baseline_skips_ueba_penalty() -> None:
+    # Unprofiled asset (has_baseline=False): no 0.70 penalty, so a confirmed
+    # attack is not capped at "medium".
+    slm, llm = _suspect_pair()
+    score = compute_risk_score(
+        slm=slm,
+        llm=llm,
+        rule_level=7,
+        asset_criticality="tier2",
+        ueba_anomaly_score=0.0,
+        has_baseline=False,
+    )
+    assert score.score_breakdown["ueba_factor"] == 1.0
+    # base = 0.85*0.30 + 1.0*0.50 + (7/15)*0.20 = 0.8483 → *1.0*1.0
+    assert score.danger_score >= 0.6  # now reaches "high", not "medium"
+
+
+def test_baseline_normal_keeps_ueba_penalty() -> None:
+    # A real baseline reporting normal behaviour keeps the 0.70 penalty.
+    slm, llm = _suspect_pair()
+    score = compute_risk_score(
+        slm=slm,
+        llm=llm,
+        rule_level=7,
+        asset_criticality="tier2",
+        ueba_anomaly_score=0.0,
+        has_baseline=True,
+    )
+    assert score.score_breakdown["ueba_factor"] == 0.7
+    assert score.danger_score < 0.6  # capped to "medium" band

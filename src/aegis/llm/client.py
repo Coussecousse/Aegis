@@ -1,27 +1,22 @@
 """
 Ollama HTTP client for AEGIS LLM and SLM inference.
 
-Provides async interface to Ollama models (TinyLlama SLM + Mistral 7B LLM).
+Provides an async interface to a single Ollama instance. AEGIS runs two
+independent Ollama instances on the Raspberry Pi, each pinned to its own CPU
+cores so a multi-minute LLM analysis never blocks SLM triage:
+- SLM instance (Qwen 2.5 1.5B) on port 11434, 1 CPU core
+- LLM instance (Mistral 7B Q4) on port 11435, the remaining CPU cores
+
+Each consumer constructs its own OllamaClient pointed at its instance's
+base_url (OLLAMA_SLM_BASE_URL / OLLAMA_LLM_BASE_URL).
+
 Handles:
 - HTTP requests to Ollama API (generate endpoint)
 - Exponential retry (3 attempts: 1s/2s/4s backoff)
-- Separate timeouts: SLM (10s) and LLM (45s)
 - Fallback JSON parsing with validation
 - Zero external API calls (100% on-premise)
 
-CRITICAL: Ollama must listen on 0.0.0.0:11434 on Raspberry Pi.
-
-Raspberry Pi WireGuard Configuration:
-The Raspberry Pi (AI node) is accessible only via WireGuard tunnel (IP 10.0.0.1).
-By default, Ollama binds to 127.0.0.1:11434 (localhost only).
-
-To make Ollama accessible over WireGuard:
-1. Edit systemd service: sudo systemctl edit ollama
-2. Add: Environment="OLLAMA_HOST=0.0.0.0:11434"
-3. Restart: sudo systemctl restart ollama
-4. Verify: curl http://10.0.0.1:11434/api/tags
-
-See docs/raspberrypi-ollama-setup.md for complete setup.
+See docs/raspberrypi-ollama-setup.md for the two-instance setup.
 """
 
 import asyncio
@@ -46,7 +41,9 @@ class OllamaClient:
         Initialize Ollama client.
 
         Args:
-            base_url: Base URL of Ollama API (e.g., http://10.0.0.1:11434).
+            base_url: Base URL of this Ollama instance (e.g.
+                http://10.0.0.1:11434 for the SLM instance, or
+                http://10.0.0.1:11435 for the LLM instance).
         """
         self.base_url = base_url.rstrip("/")
         self._client: httpx.AsyncClient | None = None
@@ -61,17 +58,35 @@ class OllamaClient:
         if self._client is not None:
             await self._client.aclose()
 
-    async def generate(self, model: str, prompt: str, timeout: float = 45.0) -> dict[str, Any]:
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        timeout: float = 45.0,
+        keep_alive: int = 300,
+        num_predict: int | None = None,
+        format_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Generate response from Ollama model with exponential retry.
 
         Attempts up to 3 times with backoff: 1s, 2s, 4s.
-        Parses JSON from response (Modelfile ensures JSON-only output).
+        Parses JSON from response (constrained decoding via format=json).
 
         Args:
-            model: Model name (e.g., "tinyllama-aegis", "mistral-aegis").
+            model: Model name (e.g., "qwen25-aegis", "mistral-aegis").
             prompt: Prompt text to send to the model.
-            timeout: Request timeout in seconds (SLM: 10s, LLM: 45s).
+            timeout: Request timeout in seconds (SLM: 30s, LLM: 180s).
+            keep_alive: Seconds to keep model in RAM after last request (default 5 min).
+                        Pass -1 to keep indefinitely, 0 to unload immediately.
+            num_predict: Max tokens to generate. On slow CPU-only inference (e.g.
+                         Raspberry Pi), capping this keeps small-JSON responses (SLM
+                         triage) within the timeout instead of running unbounded.
+                         None lets Ollama use its own default.
+            format_schema: Optional JSON Schema for Ollama structured outputs. When
+                           provided, decoding is constrained to this exact shape (all
+                           required keys, correct types) instead of free-form JSON —
+                           requires Ollama >= 0.5. None falls back to ``format="json"``.
 
         Returns:
             dict: Parsed JSON response from model.
@@ -80,12 +95,32 @@ class OllamaClient:
             ValueError: If response is not valid JSON after all retries.
             httpx.HTTPError: If all HTTP requests fail (after 3 retries).
         """
+        return await self._generate_with_retry(
+            model, prompt, timeout, keep_alive, num_predict, format_schema
+        )
+
+    async def _generate_with_retry(
+        self,
+        model: str,
+        prompt: str,
+        timeout: float,
+        keep_alive: int,
+        num_predict: int | None,
+        format_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send the request to Ollama, retrying with exponential backoff on failure."""
         url = f"{self.base_url}/api/generate"
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "stream": False,
+            # constrained decoding — a JSON Schema forces the exact shape (all keys,
+            # right types); "json" only forces syntactically-valid free-form JSON.
+            "format": format_schema if format_schema is not None else "json",
+            "keep_alive": keep_alive,
         }
+        if num_predict is not None:
+            payload["options"] = {"num_predict": num_predict}
 
         backoff_times = [1.0, 2.0, 4.0]
 

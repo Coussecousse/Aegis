@@ -29,6 +29,20 @@ class _FakeChromaModule:
         return _async_http_client
 
 
+class _FakeChromaModuleSyncOnly:
+    def __init__(self, collection: _FakeCollectionSync) -> None:
+        self._collection = collection
+        self.HttpClient = self._build_http_client()
+
+    def _build_http_client(self) -> Any:
+        def _http_client(host: str, port: int) -> _FakeChromaClientSync:
+            _ = host
+            _ = port
+            return _FakeChromaClientSync(self._collection)
+
+        return _http_client
+
+
 class _FakeCollection:
     def __init__(self, get_result: Any = None, get_error: Exception | None = None) -> None:
         self._get_result = get_result
@@ -47,6 +61,24 @@ class _FakeCollection:
         self.upsert_calls += 1
 
 
+class _FakeCollectionSync:
+    def __init__(self, get_result: Any = None, get_error: Exception | None = None) -> None:
+        self._get_result = get_result
+        self._get_error = get_error
+        self.upsert_calls = 0
+        self.last_upsert_kwargs: dict[str, Any] = {}
+
+    def get(self, ids: list[str]) -> dict[str, Any]:
+        _ = ids
+        if self._get_error is not None:
+            raise self._get_error
+        return self._get_result if isinstance(self._get_result, dict) else {"metadatas": []}
+
+    def upsert(self, **kwargs: Any) -> None:
+        self.last_upsert_kwargs = kwargs
+        self.upsert_calls += 1
+
+
 class _FakeIdentityConnector(BaseIdentityConnector):
     def __init__(self, context: RagContext) -> None:
         self.fetch_identity_context_mock: AsyncMock = AsyncMock(return_value=context)
@@ -60,6 +92,15 @@ class _FakeChromaClient:
         self._collection = collection
 
     async def get_or_create_collection(self, name: str) -> _FakeCollection:
+        _ = name
+        return self._collection
+
+
+class _FakeChromaClientSync:
+    def __init__(self, collection: _FakeCollectionSync) -> None:
+        self._collection = collection
+
+    def get_or_create_collection(self, name: str) -> _FakeCollectionSync:
         _ = name
         return self._collection
 
@@ -94,6 +135,36 @@ async def test_get_asset_context_found_tier0(monkeypatch: pytest.MonkeyPatch) ->
         context = await client.get_asset_context("dc-01")
 
     assert context.asset_criticality == "tier0"
+    assert context.ueba.has_baseline is True
+
+
+@pytest.mark.asyncio
+async def test_get_asset_context_uses_sync_fallback_when_async_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection = _FakeCollectionSync(
+        get_result={
+            "metadatas": [
+                {
+                    "asset_name": "APP-01",
+                    "asset_criticality": "tier1",
+                    "asset_description": "Application server",
+                    "similar_incidents": "[]",
+                }
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        rag_client_module,
+        "_get_chromadb_module",
+        lambda: _FakeChromaModuleSyncOnly(collection),
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        context = await client.get_asset_context("app-01")
+
+    assert context.asset_criticality == "tier1"
 
 
 @pytest.mark.asyncio
@@ -113,6 +184,7 @@ async def test_get_asset_context_not_found_fallback_tier2(
         context = await client.get_asset_context("missing-asset")
 
     assert context.asset_criticality == "tier2"
+    assert context.ueba.has_baseline is False
     assert "not found in ChromaDB" in caplog.text
 
 
@@ -251,3 +323,71 @@ def test_tier0_mapping_yields_criticality_multiplier_1_5() -> None:
     score = compute_risk_score(slm=slm, llm=llm, rule_level=10, asset_criticality="tier0")
 
     assert score.score_breakdown["criticality_multiplier"] == 1.5
+
+
+class _StatefulCollection:
+    """Fake collection that persists upserts, so record_activity can be exercised
+    across calls (a burst must actually raise the stored anomaly score)."""
+
+    def __init__(self, metadata: dict[str, Any] | None) -> None:
+        self._metadata = metadata
+        self.upsert_calls = 0
+
+    async def get(self, ids: list[str]) -> dict[str, Any]:
+        _ = ids
+        return {"metadatas": [self._metadata] if self._metadata is not None else []}
+
+    async def upsert(self, **kwargs: Any) -> None:
+        self._metadata = kwargs["metadatas"][0]
+        self.upsert_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_record_activity_raises_anomaly_on_burst(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _StatefulCollection(
+        {
+            "asset_name": "WS-01",
+            "asset_criticality": "tier2",
+            "asset_description": "Workstation",
+            "baseline_description": "behavioral",
+            "associated_users": "[]",
+            "normal_activity_window": "Unknown",
+            "recent_anomalies": "[]",
+            "anomaly_score": "0.0",
+            "baseline_rate": "1.0",
+            "event_timestamps": "[]",
+        }
+    )
+    monkeypatch.setattr(
+        rag_client_module, "_get_chromadb_module", lambda: _FakeChromaModule(collection)
+    )
+
+    scores: list[float] = []
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        # A burst of events at the same instant (all inside the window).
+        for _ in range(8):
+            ctx = await client.record_activity("WS-01", now=1000.0)
+            scores.append(ctx.ueba.anomaly_score)
+
+    assert scores[0] == 0.0  # first event is at baseline
+    assert max(scores) > 0.5  # the burst is detected at its peak
+    # The EWMA baseline then absorbs sustained load, so the score decays back.
+    assert scores[-1] < max(scores)
+    assert all(0.0 <= s <= 1.0 for s in scores)
+    assert collection.upsert_calls == 8
+
+
+@pytest.mark.asyncio
+async def test_record_activity_unprofiled_returns_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _StatefulCollection(None)  # asset absent from ChromaDB
+    monkeypatch.setattr(
+        rag_client_module, "_get_chromadb_module", lambda: _FakeChromaModule(collection)
+    )
+
+    async with ChromaDBClient(host="chromadb", port=8000) as client:
+        ctx = await client.record_activity("unknown-asset", now=1000.0)
+
+    assert ctx.asset_criticality == "tier2"
+    assert ctx.ueba.has_baseline is False
+    assert ctx.ueba.anomaly_score == 0.0
+    assert collection.upsert_calls == 0  # nothing to record for an unprofiled asset

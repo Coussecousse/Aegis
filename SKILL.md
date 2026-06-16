@@ -39,9 +39,9 @@ Wazuh 4.7 → RabbitMQ 3.12 (queue: aegis.triage)
 WireGuard IP : 10.0.0.1  (accessible via tunnel wg-aegis only)
 SSH          : ssh kika@10.0.0.1
 Firewall     : nftables strict (WireGuard UDP 51820 only outbound)
-Ollama ARM   : OLLAMA_HOST=0.0.0.0:11434 (systemd override required)
-  tinyllama-aegis  → SLM triage  (TinyLlama 1.1B, timeout 10s)
-  mistral-aegis    → LLM analysis (Mistral 7B Q4, timeout 45s)
+Ollama ARM   : two partitioned instances (systemd, see docs/raspberrypi-ollama-setup.md)
+  ollama-slm  0.0.0.0:11434, 1 core  → qwen25-aegis  (SLM triage,  timeout 90s)
+  ollama-llm  0.0.0.0:11435, 3 cores → mistral-aegis (LLM analysis, timeout 240s)
 ```
 
 ### Developer environment
@@ -52,23 +52,53 @@ No environment-specific assumptions should be hardcoded anywhere in the project.
 
 ---
 
-## Pipeline (strict order)
+## Pipeline (two stages — see docs/middleware.md)
 
+Stage 1 — triage (queue `aegis.triage`, fast):
 ```
-1. WazuhLog ← RabbitMQ consumer (aio-pika)
-2. SLM TinyLlama → SlmResponse (timeout 10s)
-3. Gate: confidence < 0.5 → ACK, discard (~90% of alerts filtered here)
-4. ChromaDB → RagContext + UEBAMetrics (asset metadata + behavioral baselines)
-5. LLM Mistral 7B → LlmResponse (timeout 45s, fallback to SLM if timeout)
-6. risk_scorer → danger_score
-   formula : (SLM×0.30 + LLM×0.50 + rule_level/15×0.20) × criticality_multiplier
-   tiers   : tier0=1.5 | tier1=1.2 | tier2=1.0 | clamp [0.0, 1.0]
-   uncertainty : |SLM_conf - LLM_conf| → low<0.1 | medium<0.25 | high≥0.25
-7. Decision: ≥0.8→critical | ≥0.6→high | ≥0.4→medium | <0.4→low
-8. AegisReport assembled (log + slm + llm + rag + risk_score + decision)
-9. Shuffle SOAR webhook → AegisReport delivered
-10. Human-in-the-loop: explicit validation before any critical action
+1. WazuhLog ← RabbitMQ consumer (aio-pika, persistent msgs)
+2. SLM Qwen 2.5 1.5B → SlmResponse (evaluates rule content from level 6 up)
+3. Suspicion gate: not is_suspect or confidence < SUSPICION_THRESHOLD → discard
+4. ChromaDB record_activity → RagContext + UEBA; updates BEHAVIORAL anomaly_score
+   (sliding window + EWMA baseline, rag/ueba.py); unprofiled asset → enqueue identity.sync
+5. UEBA FP gate: discard only if baseline-normal AND low rule level AND non-critical
+   AND SLM confidence < FP_GATE_CONFIDENCE_CEILING (a confident suspicion always escalates)
+   → escalate: publish EscalatedAlert to aegis.reports
 ```
+Stage 2 — analysis (queue `aegis.reports`, slow):
+```
+6. LLM Mistral 7B → LlmResponse; the LLM AUTHORS recommended_action itself
+   (names attacker IP + endpoint) — NO deterministic playbook
+7. risk_scorer → danger_score
+   base   : SLM×0.30 + LLM×0.50 + rule_level/15×0.20
+   danger : base × criticality_multiplier × ueba_factor, clamp [0,1]
+   tiers  : tier0=1.5 | tier1=1.2 | tier2=1.0   (privilege, separate from anomaly)
+   ueba   : 0.70 + anomaly_score×0.30 (with baseline) else 1.0   (behavior)
+8. Decision: ≥0.8 critical | ≥0.6 high | ≥0.4 medium | <0.4 low
+   — a CONFIRMED attack raises the severity floor to the LLM's severity
+9. AegisReport → Shuffle SOAR webhook
+10. Human-in-the-loop: explicit validation; auto_remediation_allowed = False
+```
+Reliability: durable queues, persistent messages, 1 h TTL + dead-letter to
+`aegis.deadletter` (nothing silently dropped).
+
+---
+
+## Documentation
+
+| Doc | Topic |
+|---|---|
+| `docs/architecture.md` | Repo file map |
+| `docs/middleware.md` | Pipeline, gates, risk, reliability |
+| `docs/ueba.md` | Identity store, gate, behavioral scoring |
+| `docs/wazuh-alerts.md` | Wazuh alert format ingested + filtering |
+| `docs/soar-response-actions.md` | Human-validated containment (Shuffle) — current + planned |
+| `docs/testing.md` | Test layers + how to run |
+| `docs/getting-started.md` | Setup steps + gotchas |
+| `docs/makefile.md` | Every make target |
+| `docs/benchmarks/README.md` | KPIs (targets, results, reproduce) |
+| `docs/runbooks/poc-linux-startup.md` | POC startup (Juice Shop, Kali, Shuffle) |
+| `docs/raspberrypi-ollama-setup.md` | Node 2 (Pi + Ollama) setup |
 
 ---
 
@@ -102,7 +132,7 @@ No environment-specific assumptions should be hardcoded anywhere in the project.
 | `vault/loader.py` | ✅ Runtime secrets loader into environment |
 | `__main__.py` | ✅ Entry point, loads Vault secrets and starts metrics endpoint |
 | `Modelfile.llm-mistral` | ✅ temperature 0.3, neutral system prompt |
-| `Modelfile.slm-tinyllama` | ✅ temperature 0.3, fast binary classifier |
+| `Modelfile.slm-qwen25` | ✅ temperature 0.35, structured JSON triage classifier |
 | `docker-compose.yml` (node1) | ✅ middleware + collector service + monitoring wiring |
 | `local_rules.xml` | ✅ 18 custom rules (IDs 100001–100042) |
 | `test_models.py` | ✅ Coverage ≥ 80% |

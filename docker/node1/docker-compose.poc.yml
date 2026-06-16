@@ -1,0 +1,33 @@
+# POC ONLY — Ne pas utiliser en production — Ne pas merger dans docker-compose.yml
+name: aegis-poc
+
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: "Industrie SME"
+      LDAP_DOMAIN: "industrie.local"
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-poc-ldap-admin}
+      LDAP_TLS: "false"
+    ports:
+      - "389:389"
+    networks:
+      - aegis-node1_aegis-internal
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    restart: unless-stopped
+    ports:
+      - "6080:80"
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    depends_on:
+      - openldap
+    networks:
+      - aegis-node1_aegis-internal
+
+networks:
+  aegis-node1_aegis-internal:
+    external: true

@@ -11,11 +11,11 @@ fi
 
 echo "Waiting for RabbitMQ management API..."
 for i in $(seq 1 60); do
-  status_code="$(
+  status_code="$({
     curl -sS -o /dev/null -w "%{http_code}" \
       -u "$RABBITMQ_USER:$RABBITMQ_PASSWORD" \
       "$RABBITMQ_API_URL/overview"
-  )"
+  } || printf "000")"
   if [ "$status_code" -eq 200 ]; then
     break
   fi

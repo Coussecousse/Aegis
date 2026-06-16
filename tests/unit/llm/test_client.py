@@ -59,6 +59,43 @@ async def test_generate_valid_json_returns_dict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_format_defaults_to_json_string() -> None:
+    client = OllamaClient("http://localhost:11434")
+    captured: dict[str, Any] = {}
+
+    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = args
+        captured.update(kwargs.get("json", {}))
+        return _FakeResponse(200, {"response": json.dumps({"confidence": 0.5})})
+
+    client._client = httpx.AsyncClient()
+    client._client.post = _post  # type: ignore[method-assign]
+
+    await client.generate("mistral-aegis", "prompt", timeout=10.0)
+
+    assert captured["format"] == "json"
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_format_schema_when_provided() -> None:
+    client = OllamaClient("http://localhost:11434")
+    captured: dict[str, Any] = {}
+    schema = {"type": "object", "required": ["attack_confirmed"]}
+
+    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = args
+        captured.update(kwargs.get("json", {}))
+        return _FakeResponse(200, {"response": json.dumps({"confidence": 0.5})})
+
+    client._client = httpx.AsyncClient()
+    client._client.post = _post  # type: ignore[method-assign]
+
+    await client.generate("mistral-aegis", "prompt", timeout=10.0, format_schema=schema)
+
+    assert captured["format"] == schema
+
+
+@pytest.mark.asyncio
 async def test_generate_timeout_retries_then_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     client = OllamaClient("http://localhost:11434")
     attempts = 0
@@ -173,3 +210,31 @@ async def test_generate_sends_expected_model_names() -> None:
     await client.generate("mistral-aegis", "llm prompt", timeout=45.0)
 
     assert sent_models == ["tinyllama-aegis", "mistral-aegis"]
+
+
+@pytest.mark.asyncio
+async def test_generate_posts_to_its_own_instance_base_url() -> None:
+    """Each OllamaClient only ever talks to its configured base_url — this is
+    what lets the SLM and LLM run as two independent Ollama instances pinned
+    to separate CPU cores, with no cross-talk and no shared lock between them.
+    """
+    slm_client = OllamaClient("http://10.0.0.1:11434")
+    llm_client = OllamaClient("http://10.0.0.1:11435")
+    requested_urls: list[str] = []
+
+    async def _post(*args: Any, **kwargs: Any) -> _FakeResponse:
+        requested_urls.append(str(args[0]))
+        _ = kwargs
+        return _FakeResponse(200, {"response": json.dumps({"confidence": 0.5})})
+
+    for client in (slm_client, llm_client):
+        client._client = httpx.AsyncClient()
+        client._client.post = _post  # type: ignore[method-assign]
+
+    await slm_client.generate("qwen25-aegis", "slm prompt", timeout=10.0)
+    await llm_client.generate("mistral-aegis", "llm prompt", timeout=45.0)
+
+    assert requested_urls == [
+        "http://10.0.0.1:11434/api/generate",
+        "http://10.0.0.1:11435/api/generate",
+    ]

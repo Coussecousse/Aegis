@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-16
+
+### Added
+
+- Behavioral UEBA anomaly score (Gap 2): trailing event window + EWMA baseline
+  (`rag/ueba.py`), recorded per alert via `ChromaDBClient.record_activity` and fed
+  into the risk `ueba_factor`. Privilege (asset tier) is decoupled from behaviour.
+- The local LLM now authors `recommended_action` itself (naming the attacker IP and
+  endpoint); the deterministic remediation playbook is removed.
+- Measurable, population-based UEBA KPIs (sync coverage, tier correctness,
+  identity-attack detection) and behavioral-score KPIs (rise / decay / bounds);
+  live Phase-2 Kali load benchmark.
+- Documentation hub: `architecture`, `middleware`, `ueba`, `wazuh-alerts`,
+  `soar-response-actions`, `testing`, `getting-started`, `makefile` docs; lean README.
+
+### Changed
+
+- Triage hardening: the UEBA false-positive gate no longer silences a confident SLM
+  suspicion (`FP_GATE_CONFIDENCE_CEILING`); the SLM evaluates web-attack content from
+  rule level 6 up.
+- A confirmed attack raises (never lowers) the composite severity floor.
+- RabbitMQ reliability: durable queues, persistent messages, a 1 h TTL and a
+  dead-letter exchange to `aegis.deadletter` — nothing is silently dropped under
+  overload (it is parked for human review).
+
+### Fixed
+
+- Silent alert loss under backlog (the reports queue had a 10-min TTL and no
+  dead-letter, so escalations expired unseen on a slow inference node).
+- `make docker-clean` / `docker-down` now tear down the Shuffle profile, making
+  `make docker-clean && make docker-up-full` a clean, repeatable cold boot.
+
+### Removed
+
+- Dead code (unused RAG client methods), obsolete Modelfiles (TinyLlama, Qwen-7B
+  report model), the Windows `.ps1` helper, and the ADRs (superseded by the topic docs).
+
+## [0.4.0] - 2026-05-22
+
+### Added
+
+- Wazuh collector bridge to RabbitMQ (`aegis.collectors` daemon + integration mode).
+- Prometheus metrics instrumentation and Grafana dashboard provisioning.
+- HashiCorp Vault KV v2 client and startup secret loader.
+- Shuffle triage playbook template for the human-in-the-loop workflow.
+
 ## [0.3.0] - 2026-05-21
 
 ### Added

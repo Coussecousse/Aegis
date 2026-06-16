@@ -13,21 +13,24 @@ from typing import Any
 from dotenv import load_dotenv
 
 from aegis.collectors.wazuh_forwarder import WazuhForwarder
+from aegis.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
-def _build_forwarder_from_env() -> WazuhForwarder:
-    """Build a ``WazuhForwarder`` using environment configuration."""
+def _build_forwarder(settings: Settings) -> WazuhForwarder:
+    """Build a ``WazuhForwarder`` from settings."""
+    rmq = settings.rabbitmq
     return WazuhForwarder(
-        rabbitmq_host=os.getenv("RABBITMQ_HOST", "localhost"),
-        rabbitmq_port=int(os.getenv("RABBITMQ_PORT", "5672")),
-        rabbitmq_user=os.getenv("RABBITMQ_USER", "guest"),
-        rabbitmq_password=os.getenv("RABBITMQ_PASSWORD", "guest"),
-        rabbitmq_vhost=os.getenv("RABBITMQ_VHOST", "aegis"),
+        rabbitmq_host=rmq.host,
+        rabbitmq_port=rmq.port,
+        rabbitmq_user=rmq.user,
+        rabbitmq_password=rmq.password,
+        rabbitmq_vhost=rmq.vhost,
         exchange_name="aegis.alerts",
         routing_key="alert.raw",
-        min_level=int(os.getenv("WAZUH_MIN_LEVEL", "7")),
+        min_level=settings.wazuh.min_level,
+        excluded_rules=settings.wazuh.excluded_rules,
     )
 
 
@@ -51,7 +54,7 @@ async def _run_integration_mode(alert_file: Path) -> int:
         logger.error("Alert file does not exist: %s", alert_file)
         return 1
 
-    forwarder = _build_forwarder_from_env()
+    forwarder = _build_forwarder(Settings.from_env())
     forwarded = 0
 
     await forwarder.connect()
@@ -66,35 +69,71 @@ async def _run_integration_mode(alert_file: Path) -> int:
     return 0
 
 
+def _extract_complete_lines(data: bytes) -> tuple[list[str], int]:
+    """Split a byte chunk into complete (newline-terminated) lines.
+
+    Returns the decoded non-empty complete lines and the number of bytes they
+    occupy. A trailing partial line (Wazuh still mid-write) is left unconsumed
+    so a record split across two polls is never truncated and dropped.
+
+    Args:
+        data: Bytes read from the current file position to EOF.
+
+    Returns:
+        Tuple of (complete lines, bytes consumed). ``([], 0)`` when no full line
+        is available yet.
+    """
+    last_newline = data.rfind(b"\n")
+    if last_newline == -1:
+        return [], 0
+    complete = data[: last_newline + 1]
+    text = complete.decode("utf-8", errors="replace")
+    return [line for line in text.splitlines() if line.strip()], len(complete)
+
+
 async def _run_daemon_mode() -> int:
     """Tail alerts.json by polling and forward each new JSON line."""
-    alerts_file = Path(os.getenv("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json"))
-    poll_interval = float(os.getenv("WAZUH_POLL_INTERVAL", "1.0"))
+    settings = Settings.from_env()
+    alerts_file = Path(settings.wazuh.alerts_file)
+    poll_interval = settings.wazuh.poll_interval
 
-    forwarder = _build_forwarder_from_env()
+    forwarder = _build_forwarder(settings)
     await forwarder.connect()
 
-    logger.info("Daemon mode started: file=%s poll_interval=%s", alerts_file, poll_interval)
+    # Start at end of file: a restart must not replay the whole alert history
+    # (which floods the pipeline with stale alerts). Only forward what arrives next.
+    position = alerts_file.stat().st_size if alerts_file.exists() else 0
 
-    position = 0
+    logger.info(
+        "Daemon mode started: file=%s poll_interval=%s start_offset=%s",
+        alerts_file,
+        poll_interval,
+        position,
+    )
+
     try:
         while True:
             if not alerts_file.exists():
                 await asyncio.sleep(poll_interval)
                 continue
 
-            if alerts_file.stat().st_size < position:
+            size = alerts_file.stat().st_size
+            if size < position:  # file rotated/truncated → restart from the top
                 position = 0
+            if size == position:  # nothing new
+                await asyncio.sleep(poll_interval)
+                continue
 
-            with alerts_file.open("r", encoding="utf-8", errors="replace") as handle:
+            # Binary read so the offset is an exact byte count; only advance past
+            # complete lines so a partial trailing record survives to the next poll.
+            with alerts_file.open("rb") as handle:
                 handle.seek(position)
-                lines = handle.readlines()
-                position = handle.tell()
+                data = handle.read()
+
+            lines, consumed = _extract_complete_lines(data)
+            position += consumed
 
             for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
                 try:
                     payload = json.loads(line)
                 except json.JSONDecodeError:

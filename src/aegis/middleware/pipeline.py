@@ -1,15 +1,20 @@
 """
-AEGIS pipeline orchestration: complete alert processing workflow.
+AEGIS pipeline orchestration: two-stage alert processing workflow.
 
-Processes a single Wazuh log through the full pipeline:
-1. Consume log from RabbitMQ (handled by consumer.py)
-2. Send to SLM TinyLlama → quick suspicion score
-3. Check if is_suspect and confidence > SUSPICION_THRESHOLD
-4. Query ChromaDB → asset context + UEBA
-5. Send to LLM Mistral 7B → detailed threat analysis
+The pipeline is split across two independently-running RabbitMQ consumers so a
+fast SLM triage loop is never blocked behind a slow multi-minute LLM analysis:
+
+Stage 1 — triage_log() (consumer.py, queue aegis.triage):
+1. Send to SLM Qwen 2.5 1.5B → quick suspicion score
+2. Check if is_suspect and confidence > SUSPICION_THRESHOLD
+3. Query ChromaDB → asset context + UEBA, apply false-positive gate
+4. Publish an EscalatedAlert bundle to queue aegis.reports (or discard)
+
+Stage 2 — analyze_log() (consumer_analysis.py, queue aegis.reports):
+5. Send to LLM Mistral 7B → detailed threat analysis (with fallback)
 6. Compute composite risk_score (danger_score + uncertainty)
-7. Send final AegisReport to Shuffle SOAR
-8. Return complete report for human review (human-in-the-loop)
+7. Build the final AegisReport and send it to Shuffle SOAR
+8. Return the complete report for human review (human-in-the-loop)
 
 Timing: Measure total time in milliseconds.
 Logging: Structured JSON at each step.
@@ -20,6 +25,7 @@ Zero cloud calls. Zero automatic remediation (human validation required).
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
@@ -28,6 +34,7 @@ from aegis.llm.client import OllamaClient
 from aegis.middleware.models import (
     AegisReport,
     Decision,
+    EscalatedAlert,
     LlmResponse,
     SlmResponse,
     WazuhLog,
@@ -43,43 +50,50 @@ from aegis.soar.client import ShuffleClient
 
 logger = logging.getLogger(__name__)
 
+# Fallback model names when a caller doesn't pass one (the consumers always do,
+# sourced from Settings/env). Kept as literals so config lives only in Settings.
+_DEFAULT_SLM_MODEL = "qwen25-aegis"
+_DEFAULT_LLM_MODEL = "mistral-aegis"
 
-async def process_log(
+
+async def triage_log(
     log: WazuhLog,
     ollama_client: OllamaClient,
     chromadb_client: ChromaDBClient,
-    shuffle_client: ShuffleClient,
     metrics: MetricsCollector | None = None,
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,
-    llm_timeout: float = 45.0,
-) -> AegisReport | None:
+    slm_model: str = _DEFAULT_SLM_MODEL,
+    on_unprofiled_asset: Callable[[str], Awaitable[None]] | None = None,
+    fp_gate_confidence_ceiling: float = 0.6,
+) -> EscalatedAlert | None:
     """
-    Process a single Wazuh alert through the complete AEGIS pipeline.
+    Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
 
-    Pipeline steps (strict order):
-    1. SLM: Quick suspicion scoring (TinyLlama)
-    2. Gate: If not suspect or low confidence → ACK and return None
+    Triage steps (strict order):
+    1. SLM: Quick suspicion scoring (Qwen 2.5 1.5B)
+    2. Gate: If not suspect or low confidence → discard, return None
     3. RAG: Fetch asset context + UEBA from ChromaDB
-    4. LLM: Detailed threat analysis (Mistral 7B) with fallback
-    5. Risk: Compute composite danger_score + uncertainty
-    6. Decision: Determine action (always requires human validation in v0.2)
-    7. Report: Create final AegisReport
-    8. SOAR: Send to Shuffle webhook
-    9. Return: Complete report for human review
+    4. Gate: UEBA false-positive filter → discard, return None
+
+    Logs that pass both gates are bundled into an EscalatedAlert for the
+    analysis stage (analyze_log) to pick up from the aegis.reports queue.
 
     Args:
-        log: WazuhLog to process.
-        ollama_client: Initialized OllamaClient for SLM/LLM inference.
+        log: WazuhLog to triage.
+        ollama_client: Initialized OllamaClient for SLM inference.
         chromadb_client: Initialized ChromaDBClient for asset context.
-        shuffle_client: Initialized ShuffleClient for webhook delivery.
+        metrics: Optional metrics collector for Prometheus reporting.
         suspicion_threshold: Minimum confidence to proceed past SLM (default: 0.5).
         slm_timeout: SLM request timeout in seconds (default: 10).
-        llm_timeout: LLM request timeout in seconds (default: 45).
+        fp_gate_confidence_ceiling: The UEBA false-positive gate never suppresses an
+            alert whose SLM confidence is at or above this (default: 0.6). A confident
+            SLM suspicion plus a fired Wazuh rule are two agreeing signals that a calm
+            asset baseline must not silently veto.
 
     Returns:
-        AegisReport: Complete analysis report, or None if alert was discarded
-                     as benign during SLM gate.
+        EscalatedAlert: Bundle to publish for analysis, or None if the alert
+                        was discarded as benign during triage.
     """
     start_time = time.time()
     total_perf_start = time.perf_counter()
@@ -115,9 +129,11 @@ async def process_log(
 
         slm_prompt = build_slm_prompt(log)
         slm_response_dict = await ollama_client.generate(
-            model="tinyllama-aegis",
+            model=slm_model,
             prompt=slm_prompt,
             timeout=slm_timeout,
+            keep_alive=-1,  # keep SLM permanently in RAM — Pi 16 GB holds both models
+            num_predict=180,
         )
         slm = SlmResponse(**slm_response_dict)
 
@@ -138,27 +154,31 @@ async def process_log(
     except Exception as e:
         if metrics is not None:
             metrics.record_slm(time.perf_counter() - slm_stage_start)
-            metrics.record_alert(
-                status="error",
-                severity="unknown",
-                duration_s=time.perf_counter() - total_perf_start,
-            )
-        logger.error(
+        logger.warning(
             json.dumps(
                 {
                     "event": "slm_error",
                     "error": str(e),
                     "rule_id": log.rule_id,
+                    "fallback": "escalating_to_llm",
                 }
             )
         )
-        return None
+        # SLM failed (model too small, schema mismatch, timeout) — escalate conservatively
+        slm = SlmResponse(
+            is_suspect=True,
+            confidence=0.6,
+            behavior_category="normal",
+            reasoning_short="SLM triage unavailable — escalating to LLM",
+            raw_probabilities={"suspect": 0.6, "benign": 0.4},
+        )
 
     # ========================================================================
     # STEP 2: Gate - Check suspicion threshold
     # ========================================================================
     if not slm.is_suspect or slm.confidence < suspicion_threshold:
         if metrics is not None:
+            metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(
                 status="discarded",
                 severity="low",
@@ -199,7 +219,11 @@ async def process_log(
             )
         )
 
-        rag = await chromadb_client.get_asset_context(log.source_ip)
+        # record_activity also updates the asset's behavioral anomaly score (Gap 2):
+        # each alert is one activity event, scored against the asset's own baseline.
+        # Use the alert's own timestamp (when the activity happened) rather than the
+        # triage time, so a real burst is not flattened by serial processing lag.
+        rag = await chromadb_client.record_activity(log.source_ip, now=log.timestamp.timestamp())
 
         logger.info(
             json.dumps(
@@ -218,6 +242,7 @@ async def process_log(
     except Exception as e:
         if metrics is not None:
             metrics.record_rag(time.perf_counter() - rag_stage_start)
+            metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(
                 status="error",
                 severity="unknown",
@@ -233,6 +258,116 @@ async def process_log(
             )
         )
         return None
+
+    # UEBA self-update: an unprofiled asset (no baseline) triggers an identity sync
+    # so its UEBA context is populated for next time. Self-limiting — once synced,
+    # has_baseline becomes True and this stops firing. Failures here must not drop
+    # the alert, so the publisher swallows its own errors.
+    if not rag.ueba.has_baseline and on_unprofiled_asset is not None:
+        await on_unprofiled_asset(log.source_ip)
+
+    # ========================================================================
+    # STEP 3b: UEBA false-positive gate
+    # Discard only when a real behavioural baseline confirms this is normal
+    # (low anomaly), the rule is low severity, the asset is not critical
+    # infrastructure, AND the SLM was only weakly suspicious. A confident SLM
+    # suspicion (>= fp_gate_confidence_ceiling) means the model and a fired Wazuh
+    # rule agree it is an attack — a calm asset baseline must not silently veto
+    # that (otherwise a level-7 SQLi on a "quiet" profiled asset is dropped before
+    # the LLM ever sees it). Without a baseline (has_baseline=False),
+    # anomaly_score=0.0 means "unknown", not "normal", so the gate fails open.
+    # ========================================================================
+    if (
+        rag.ueba.has_baseline
+        and rag.ueba.anomaly_score < 0.15
+        and log.rule_level <= 8
+        and rag.asset_criticality != "tier0"
+        and slm.confidence < fp_gate_confidence_ceiling
+    ):
+        if metrics is not None:
+            metrics.record_triage(time.perf_counter() - total_perf_start)
+            metrics.record_alert(
+                status="discarded",
+                severity="low",
+                duration_s=time.perf_counter() - total_perf_start,
+            )
+        logger.info(
+            json.dumps(
+                {
+                    "event": "alert_discarded",
+                    "reason": "ueba_fp_gate",
+                    "ueba_anomaly_score": rag.ueba.anomaly_score,
+                    "rule_level": log.rule_level,
+                    "asset_criticality": rag.asset_criticality,
+                    "slm_confidence": slm.confidence,
+                }
+            )
+        )
+        return None
+
+    if metrics is not None:
+        metrics.record_triage(time.perf_counter() - total_perf_start)
+
+    logger.info(
+        json.dumps(
+            {
+                "event": "triage_escalated",
+                "alert_id": str(log.id),
+                "report_id": str(report_id),
+                "confidence": slm.confidence,
+                "asset_criticality": rag.asset_criticality,
+            }
+        )
+    )
+
+    return EscalatedAlert(
+        report_id=report_id,
+        pipeline_start=pipeline_start,
+        start_time=start_time,
+        log=log,
+        slm_analysis=slm,
+        rag_context=rag,
+    )
+
+
+async def analyze_log(
+    escalated: EscalatedAlert,
+    ollama_client: OllamaClient,
+    shuffle_client: ShuffleClient,
+    metrics: MetricsCollector | None = None,
+    llm_timeout: float = 45.0,
+    llm_model: str = _DEFAULT_LLM_MODEL,
+    use_schema: bool = False,
+) -> AegisReport | None:
+    """
+    Run the slow analysis stage of the AEGIS pipeline (LLM + risk + report + SOAR).
+
+    Analysis steps (strict order):
+    1. LLM: Detailed threat analysis (Mistral 7B) with fallback to SLM confidence
+    2. Risk: Compute composite danger_score + uncertainty
+    3. Decision: Determine action (always requires human validation)
+    4. Report: Create final AegisReport
+    5. SOAR: Send to Shuffle webhook
+    6. Return: Complete report for human review
+
+    Args:
+        escalated: EscalatedAlert bundle produced by triage_log.
+        ollama_client: Initialized OllamaClient for LLM inference.
+        shuffle_client: Initialized ShuffleClient for webhook delivery.
+        metrics: Optional metrics collector for Prometheus reporting.
+        llm_timeout: LLM request timeout in seconds (default: 45).
+
+    Returns:
+        AegisReport: Complete analysis report, or None if report construction
+                     or risk scoring failed.
+    """
+    log = escalated.log
+    slm = escalated.slm_analysis
+    rag = escalated.rag_context
+    report_id = escalated.report_id
+    pipeline_start = escalated.pipeline_start
+    start_time = escalated.start_time
+    total_perf_start = time.perf_counter()
 
     # ========================================================================
     # STEP 4: LLM - Detailed threat analysis (with fallback)
@@ -251,9 +386,16 @@ async def process_log(
 
         llm_prompt = build_llm_prompt(log, slm, rag)
         llm_response_dict = await ollama_client.generate(
-            model="mistral-aegis",
+            model=llm_model,
             prompt=llm_prompt,
             timeout=llm_timeout,
+            keep_alive=-1,  # Pi 16 GB holds both SLM and LLM — no swap needed
+            # The full report JSON (10 fields, multi-sentence summary) needs headroom
+            # to close. At 450 the model truncated mid-string under format=json, yielding
+            # invalid JSON that was discarded into the SLM fallback. Set here (not only in
+            # the Modelfile) so the cap holds regardless of the deployed model build.
+            num_predict=768,
+            format_schema=LlmResponse.model_json_schema() if use_schema else None,
         )
 
         llm = LlmResponse(**llm_response_dict)
@@ -265,6 +407,10 @@ async def process_log(
                     "confidence": llm.confidence,
                     "attack_confirmed": llm.attack_confirmed,
                     "severity": llm.severity,
+                    "attack_type": llm.attack_type,
+                    "summary": llm.plain_language_summary,
+                    "action": llm.recommended_action,
+                    "requires_human_validation": llm.requires_human_validation,
                 }
             )
         )
@@ -304,6 +450,8 @@ async def process_log(
             llm=llm,
             rule_level=log.rule_level,
             asset_criticality=rag.asset_criticality,
+            ueba_anomaly_score=rag.ueba.anomaly_score,
+            has_baseline=rag.ueba.has_baseline,
         )
 
         logger.info(
@@ -338,7 +486,7 @@ async def process_log(
     # STEP 6: Decision - Determine severity and action
     # ========================================================================
 
-    # Severity mapping: danger_score → severity
+    # Severity mapping: danger_score → severity (the composite risk floor).
     severity: Literal["critical", "high", "medium", "low"]
     if risk_score.danger_score >= 0.8:
         severity = "critical"
@@ -349,23 +497,36 @@ async def process_log(
     else:
         severity = "low"
 
-    # CONSTRAINT: In v0.2, human-in-the-loop is mandatory
-    # Zero automatic remediation (auto_remediation_allowed = False)
+    # A CONFIRMED attack may raise (never lower) the composite severity: the LLM
+    # analysed the alert and assigned its own severity, so a confirmed SQLi/XSS is
+    # not filed as "medium" just because the host is calm and non-critical. The
+    # composite stays the floor; the human gate still applies regardless.
+    _rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    if llm is not None and llm.attack_confirmed and _rank.get(llm.severity, 0) > _rank[severity]:
+        severity = llm.severity
+
+    # NON-NEGOTIABLE CONSTRAINT: human-in-the-loop is mandatory.
+    # Zero automatic remediation (auto_remediation_allowed = False).
     requires_human = True
     auto_remediation = False
 
     if llm is None:
-        # LLM timeout → force human validation
+        # LLM unavailable (timeout OR unparseable/incomplete response) → human validation.
+        # Keep the wording cause-agnostic: this path also fires on malformed JSON, so
+        # "timed out" would be misleading in the report.
         recommended_action = (
-            "LLM analysis timed out. Manual review required. "
-            "Recommend isolating the source workstation and investigating."
+            "LLM analysis unavailable (timeout or invalid response). Manual review "
+            "required. Recommend isolating the source workstation and investigating."
         )
         requires_human = True
         auto_remediation = False
     else:
+        # The LLM owns the remediation: it has the alert, asset and UEBA context and is
+        # expected to name the attacker IP, the endpoint and a concrete step itself. No
+        # deterministic playbook override — a sovereign local model must reason about the
+        # action, not read it from a hardcoded template.
         recommended_action = llm.recommended_action
-        requires_human = llm.requires_human_validation
-        # Even if LLM says no human needed, v0.2 always requires it
+        # Even if the LLM says no human is needed, AEGIS always requires it.
         requires_human = True
 
     decision = Decision(

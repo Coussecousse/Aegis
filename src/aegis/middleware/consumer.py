@@ -1,297 +1,167 @@
-"""
-RabbitMQ consumer for AEGIS pipeline.
+"""Triage-stage processor for the AEGIS pipeline (fast SLM + RAG + gates).
 
-Listens to the configured RabbitMQ queue for incoming Wazuh alerts.
-For each message:
-1. Parse JSON → WazuhLog
-2. Call pipeline.process_log()
-3. ACK if success | NACK + requeue if error
-
-Handles connection resilience: reconnect on disconnect.
-Zero cloud calls. On-premise RabbitMQ only.
+Behind :class:`MessageConsumer` (queue ``aegis.triage``): decode a Wazuh alert,
+run :func:`triage_log`, and publish escalated alerts onward to the analysis
+stage. Talks to the dedicated SLM Ollama instance so a multi-minute LLM analysis
+on the other instance never blocks triage.
 """
 
-import asyncio
+from __future__ import annotations
+
 import json
 import logging
-from urllib.parse import quote
+import time
+from contextlib import AsyncExitStack
+from typing import Any
 
-import aio_pika
-from aio_pika.abc import (
-    AbstractChannel,
-    AbstractIncomingMessage,
-    AbstractQueue,
-    AbstractRobustConnection,
-)
 from pydantic import ValidationError
 
+from aegis.config import Settings
 from aegis.llm.client import OllamaClient
+from aegis.middleware.message_consumer import (
+    MessageConsumer,
+    Publisher,
+    UnprocessableMessageError,
+)
 from aegis.middleware.models import WazuhLog
-from aegis.middleware.pipeline import process_log
+from aegis.middleware.pipeline import triage_log
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
-from aegis.soar.client import ShuffleClient
 
 logger = logging.getLogger(__name__)
 
+# Routing key used to hand escalated alerts from the triage stage to the
+# analysis stage — bound to the (already provisioned) aegis.reports queue.
+ESCALATED_ALERT_ROUTING_KEY = "alert.escalated"
 
-class RabbitMQConsumer:
-    """Async RabbitMQ consumer for Wazuh alerts."""
+# Routing key that enqueues an identity-sync job — bound to the identity.sync queue.
+IDENTITY_SYNC_ROUTING_KEY = "identity.sync"
+# Don't re-enqueue a sync for the same asset within this window (the first sync is
+# still in flight); once it lands, has_baseline flips True and triage stops asking.
+_IDENTITY_SYNC_DEDUP_TTL = 300.0
+
+
+class TriageProcessor:
+    """Run SLM triage on one Wazuh alert and publish escalations onward."""
 
     def __init__(
         self,
-        rabbitmq_host: str = "localhost",
-        rabbitmq_port: int = 5672,
-        rabbitmq_user: str = "guest",
-        rabbitmq_password: str | None = None,
-        rabbitmq_vhost: str = "aegis",
-        queue_name: str = "aegis.triage",
+        *,
         ollama_base_url: str = "http://10.0.0.1:11434",
         chromadb_host: str = "localhost",
         chromadb_port: int = 8000,
-        shuffle_webhook_url: str = "http://shuffle:3001/api/v1/hooks/",
         metrics: MetricsCollector | None = None,
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
-        llm_timeout: float = 45.0,
+        slm_model: str = "qwen25-aegis",
+        fp_gate_confidence_ceiling: float = 0.6,
     ) -> None:
-        """
-        Initialize RabbitMQ consumer with connection parameters.
-
-        Args:
-            rabbitmq_host: RabbitMQ server hostname.
-            rabbitmq_port: RabbitMQ server port.
-            rabbitmq_user: RabbitMQ username.
-            rabbitmq_password: RabbitMQ password.
-            rabbitmq_vhost: RabbitMQ virtual host.
-            queue_name: Queue to listen to (default: aegis.triage).
-            ollama_base_url: Ollama API base URL.
-            chromadb_host: ChromaDB server hostname.
-            chromadb_port: ChromaDB server port.
-            shuffle_webhook_url: Shuffle SOAR webhook URL.
-            metrics: Optional metrics collector for Prometheus reporting.
-            suspicion_threshold: Minimum SLM confidence to proceed (default: 0.5).
-            slm_timeout: SLM inference timeout in seconds (default: 10).
-            llm_timeout: LLM inference timeout in seconds (default: 45).
-        """
-        self.rabbitmq_host = rabbitmq_host
-        self.rabbitmq_port = rabbitmq_port
-        self.rabbitmq_user = rabbitmq_user
-        self.rabbitmq_password = rabbitmq_password
-        self.rabbitmq_vhost = rabbitmq_vhost
-        self.queue_name = queue_name
-
         self.ollama_base_url = ollama_base_url
         self.chromadb_host = chromadb_host
         self.chromadb_port = chromadb_port
-        self.shuffle_webhook_url = shuffle_webhook_url
         self.metrics = metrics
-
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
-        self.llm_timeout = llm_timeout
+        self.slm_model = slm_model
+        self.fp_gate_confidence_ceiling = fp_gate_confidence_ceiling
 
-        self.connection: AbstractRobustConnection | None = None
-        self.channel: AbstractChannel | None = None
-        self.queue: AbstractQueue | None = None
+        self._stack: AsyncExitStack | None = None
+        self._ollama: OllamaClient | None = None
+        self._chroma: ChromaDBClient | None = None
+        self._recently_synced: dict[str, float] = {}
 
-    async def connect(self) -> None:
-        """
-        Establish connection to RabbitMQ.
-
-        Raises:
-            aio_pika.AMQPException: If connection fails.
-        """
-        logger.info(f"Connecting to RabbitMQ: {self.rabbitmq_host}:" f"{self.rabbitmq_port}")
-
-        # Build connection URL
-        encoded_user = quote(self.rabbitmq_user or "", safe="")
-        safe_password = self.rabbitmq_password or ""
-        encoded_password = quote(safe_password, safe="")
-        encoded_vhost = quote(self.rabbitmq_vhost or "/", safe="")
-        connection_url = (
-            f"amqp://{encoded_user}:{encoded_password}"
-            f"@{self.rabbitmq_host}:{self.rabbitmq_port}/{encoded_vhost}"
+    async def __aenter__(self) -> TriageProcessor:
+        stack = AsyncExitStack()
+        self._ollama = await stack.enter_async_context(OllamaClient(self.ollama_base_url))
+        self._chroma = await stack.enter_async_context(
+            ChromaDBClient(self.chromadb_host, self.chromadb_port)
         )
+        self._stack = stack
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        if self._stack is not None:
+            await self._stack.aclose()
+
+    def _should_request_sync(self, asset_id: str, now: float) -> bool:
+        """True (and records) when an identity sync for this asset is not deduped."""
+        last = self._recently_synced.get(asset_id)
+        if last is not None and now - last < _IDENTITY_SYNC_DEDUP_TTL:
+            return False
+        self._recently_synced[asset_id] = now
+        return True
+
+    async def process(self, payload: dict[str, Any], publish: Publisher) -> None:
+        """Triage one alert; publish an EscalatedAlert when it survives the gates."""
+        if self._ollama is None or self._chroma is None:
+            raise RuntimeError("TriageProcessor used outside its context manager")
 
         try:
-            connection = await aio_pika.connect_robust(connection_url)
-            channel = await connection.channel()
+            log = WazuhLog(**payload)
+        except ValidationError as exc:
+            raise UnprocessableMessageError(f"invalid WazuhLog: {exc}") from exc
 
-            # Attach to the queue provisioned by RabbitMQ definitions.
-            queue = await channel.declare_queue(
-                self.queue_name,
-                passive=True,
-            )
-
-            self.connection = connection
-            self.channel = channel
-            self.queue = queue
-
-            logger.info(f"Connected to RabbitMQ. Listening to queue: {self.queue_name}")
-
-        except Exception as e:
-            logger.error(f"RabbitMQ connection failed: {e}")
-            raise
-
-    async def start(self) -> None:
-        """
-        Start consuming messages from RabbitMQ queue.
-
-        Runs indefinitely until interrupted (SIGTERM/SIGINT).
-        Processes each message through the AEGIS pipeline.
-        """
-        ollama_client = OllamaClient(self.ollama_base_url)
-        chromadb_client = ChromaDBClient(self.chromadb_host, self.chromadb_port)
-        shuffle_client = ShuffleClient(self.shuffle_webhook_url)
-
-        try:
-            async with ollama_client, chromadb_client, shuffle_client:
-                while True:
-                    try:
-                        await self.connect()
-
-                        logger.info("Starting message consumer loop...")
-                        if self.queue is None:
-                            raise RuntimeError("Queue not initialized")
-
-                        async with self.queue.iterator() as queue_iter:
-                            async for message in queue_iter:
-                                await self._handle_message(
-                                    message,
-                                    ollama_client,
-                                    chromadb_client,
-                                    shuffle_client,
-                                )
-
-                    except asyncio.CancelledError:
-                        logger.info("Consumer cancelled. Shutting down...")
-                        raise
-                    except Exception as e:
-                        logger.warning(f"Consumer loop interrupted, reconnecting: {e}")
-                        await self.close()
-                        await asyncio.sleep(2.0)
-
-        finally:
-            await self.close()
-
-    async def _handle_message(
-        self,
-        message: AbstractIncomingMessage,
-        ollama_client: OllamaClient,
-        chromadb_client: ChromaDBClient,
-        shuffle_client: ShuffleClient,
-    ) -> None:
-        """
-        Handle a single message from RabbitMQ queue.
-
-        Args:
-            message: Incoming RabbitMQ message.
-            ollama_client: Initialized Ollama client.
-            chromadb_client: Initialized ChromaDB client.
-            shuffle_client: Initialized Shuffle client.
-        """
-        try:
-            # Parse message body
-            log_data = json.loads(message.body.decode("utf-8"))
-
-            # Validate and construct WazuhLog
+        async def _request_identity_sync(asset_id: str) -> None:
+            if not self._should_request_sync(asset_id, time.monotonic()):
+                return
+            body = json.dumps({"asset_id": asset_id}).encode("utf-8")
             try:
-                log = WazuhLog(**log_data)
-            except ValidationError as e:
+                await publish(IDENTITY_SYNC_ROUTING_KEY, body)
+                logger.info(json.dumps({"event": "identity_sync_requested", "asset_id": asset_id}))
+            except Exception as exc:  # a sync-publish failure must not drop the alert
                 logger.warning(
                     json.dumps(
-                        {
-                            "event": "invalid_log_format",
-                            "error": str(e),
-                        }
+                        {"event": "identity_sync_failed", "asset_id": asset_id, "error": str(exc)}
                     )
                 )
-                # ACK invalid messages (don't requeue)
-                await message.ack()
-                return
 
-            logger.debug(
+        escalated = await triage_log(
+            log=log,
+            ollama_client=self._ollama,
+            chromadb_client=self._chroma,
+            metrics=self.metrics,
+            suspicion_threshold=self.suspicion_threshold,
+            slm_timeout=self.slm_timeout,
+            slm_model=self.slm_model,
+            on_unprofiled_asset=_request_identity_sync,
+            fp_gate_confidence_ceiling=self.fp_gate_confidence_ceiling,
+        )
+
+        if escalated is not None:
+            body = json.dumps(escalated.model_dump(mode="json")).encode("utf-8")
+            await publish(ESCALATED_ALERT_ROUTING_KEY, body)
+            logger.info(
                 json.dumps(
                     {
-                        "event": "message_received",
+                        "event": "alert_escalated",
                         "alert_id": str(log.id),
-                        "rule_id": log.rule_id,
+                        "report_id": str(escalated.report_id),
                     }
                 )
             )
+        else:
+            logger.debug(json.dumps({"event": "alert_discarded", "alert_id": str(log.id)}))
 
-            # v0.3 SCALING NOTE:
-            # Sequential processing: one message at a time (v0.2 design).
-            # Ollama already serializes inference on the Raspberry Pi.
-            # To scale up (v0.3) if volume exceeds 100 alerts/min:
-            #   1. channel.set_qos(prefetch_count=3) — buffer 3 messages on the client side
-            #   2. asyncio.Semaphore(1) on Ollama calls — serialize inference
-            #   3. Preload ChromaDB for msg N+1 during msg N inference
-            # Monitor with Prometheus: aegis_pipeline_duration_seconds p95 > 30s
 
-            # Process through pipeline
-            report = await process_log(
-                log=log,
-                ollama_client=ollama_client,
-                chromadb_client=chromadb_client,
-                shuffle_client=shuffle_client,
-                metrics=self.metrics,
-                suspicion_threshold=self.suspicion_threshold,
-                slm_timeout=self.slm_timeout,
-                llm_timeout=self.llm_timeout,
-            )
-
-            # ACK message
-            await message.ack()
-
-            if report is not None:
-                logger.info(
-                    json.dumps(
-                        {
-                            "event": "report_generated",
-                            "alert_id": str(log.id),
-                            "danger_score": report.risk_score.danger_score,
-                        }
-                    )
-                )
-            else:
-                logger.debug(
-                    json.dumps(
-                        {
-                            "event": "alert_discarded",
-                            "alert_id": str(log.id),
-                        }
-                    )
-                )
-
-        except json.JSONDecodeError:
-            logger.error(
-                json.dumps(
-                    {
-                        "event": "invalid_json_body",
-                        "body_preview": message.body.decode("utf-8", errors="replace")[:200],
-                    }
-                )
-            )
-            # ACK poison pills: malformed JSON cannot be recovered by requeueing.
-            await message.ack()
-
-        except Exception as e:
-            logger.error(
-                json.dumps(
-                    {
-                        "event": "message_processing_error",
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                    }
-                )
-            )
-            # NACK and requeue so a transient failure can be retried.
-            await message.nack(requeue=True)
-
-    async def close(self) -> None:
-        """Close RabbitMQ connection."""
-        if self.connection is not None:
-            await self.connection.close()
-            logger.info("RabbitMQ connection closed")
+def build_triage_consumer(
+    settings: Settings, metrics: MetricsCollector | None = None
+) -> MessageConsumer:
+    """Build the triage MessageConsumer from settings."""
+    rmq = settings.rabbitmq
+    processor = TriageProcessor(
+        ollama_base_url=settings.ollama.slm_base_url,
+        chromadb_host=settings.chroma.host,
+        chromadb_port=settings.chroma.port,
+        metrics=metrics,
+        suspicion_threshold=settings.suspicion_threshold,
+        slm_timeout=settings.ollama.slm_timeout,
+        slm_model=settings.ollama.slm_model,
+        fp_gate_confidence_ceiling=settings.fp_gate_confidence_ceiling,
+    )
+    return MessageConsumer(
+        amqp_url=rmq.amqp_url,
+        queue_name=rmq.triage_queue,
+        processor=processor,
+        on_error="requeue",
+        exchange_name=rmq.exchange,
+    )
