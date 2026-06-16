@@ -65,31 +65,38 @@ cp /tmp/.env.bak .env && docker compose -f docker/node1/docker-compose.yml --env
 
 ---
 
-## 3. Pi — Phase 2: load / montée en charge (`make benchmark-load`)
+## 3. Pi — Phase 2: load / montée en charge
 
-A sustained soak (hundreds of alerts, parallel) — does AEGIS hold?
+Does AEGIS hold under a sustained flood? Measured over a **1 h Kali stress test**
+(nikto + sqlmap + nmap + an 800-request web-attack flood ≈ **~100× the Pi's
+real-time capacity**), sampling Prometheus/Grafana every 30 s (132 samples).
 
-| KPI | Target | Result |
-|---|---|---|
-| MTTT triage p95 (under load) | < 90 s | ✅ 58.5 s (sample) |
-| Silent alert loss | 0 | ✅ 0 (overload → `aegis.deadletter` parking, not discarded) |
-| `aegis.triage` drains / `aegis.reports` drains after run | drains | ✅ |
-| SOAR delivery | ≥ 99 % | ✅ 100 % |
-| Pi CPU / temperature | < 90 % / < 80 °C | 64 % / 68 °C |
-| Wazuh agent CPU | < 5 % | _measure via Wazuh API_ |
+| KPI | Target | Measured under flood (avg / peak) | Verdict |
+|---|---|---|---|
+| Silent alert loss | 0 | **0** (698 overflow *parked* in `aegis.deadletter`, 0 discarded) | ✅ |
+| Pi temperature | < 80 °C | 67.9 °C / **70.0 °C** | ✅ no throttling |
+| Pi RAM used | stable | 45.5 % / 45.6 % | ✅ never a constraint |
+| Pi CPU | < 90 % | 96 % / **100 %** | ⚠️ saturated — the bottleneck |
+| MTTT triage p95 | < 90 s | 219 s / **291 s** (→ 58 s as it drains) | ⚠️ exceeded under flood |
+| Report throughput | — | **~8 reports / hour** (sink) | capacity limit |
+| Queue peak (triage / deadletter) | — | 840 / 698 | absorbed, not lost |
 
-> **Zero-loss model:** both `aegis.triage` and `aegis.reports` are durable with
-> persistent messages, a 1 h TTL and a dead-letter exchange. Nothing is ever
-> silently dropped — an alert that can't be analysed within 1 h (Pi backlog) is
-> *parked* in `aegis.deadletter` for human review. See
+**Interpretation.** Under ~100× overload AEGIS degrades **gracefully, not
+catastrophically**: CPU pegs at 100 % but the Pi stays thermally safe and RAM-stable,
+the durable broker absorbs the backlog, triage latency rises then recovers as the
+flood subsides, and **nothing is silently lost** — overflow beyond the 1 h TTL is
+parked in `aegis.deadletter` for human review. The hard limit is **compute capacity**
+(~8 reports/h on one Pi), not reliability. To sustain higher rates: a faster Pi,
+parallel triage, or a second inference node.
+
+> **Zero-loss model:** `aegis.triage` and `aegis.reports` are durable with persistent
+> messages, a 1 h TTL and a dead-letter exchange — an alert that can't be analysed in
+> time is *parked* in `aegis.deadletter`, never dropped. See
 > [poc-linux-startup.md → Message reliability](../runbooks/poc-linux-startup.md#message-reliability--queue-ttl-dead-letter--overload).
 
-**Reproduce**
-```bash
-make benchmark-load SCENARIO=all INTENSITY=soak   # writes docs/benchmarks/report-<ts>.md
-```
-Pi CPU/RAM/temperature need a `node_exporter` on the Pi scraped by Prometheus
-(else they read `None`).
+**Reproduce.** Drive a real attacker from a Kali VM (see the POC runbook, Partie E,
+"Mise en tension"), or `make benchmark-load` (web-replay from Node 1), then aggregate
+the window from Prometheus. Pi CPU/RAM/temperature need a `node_exporter` on the Pi.
 
 ---
 

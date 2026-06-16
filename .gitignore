@@ -51,3 +51,6 @@ notes/
 docs/benchmarks/kpi-ci-latest.json
 docs/benchmarks/report-*.md
 docs/benchmarks/report-*.json
+
+# Local-only archives (incident history, scratch notes)
+*.local.md
