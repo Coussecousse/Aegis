@@ -56,17 +56,43 @@ The middleware POSTs the full `AegisReport` ([`soar/client.py`](../src/aegis/soa
 to `SHUFFLE_WEBHOOK_URL`. It carries the structured fields a response needs:
 `attack_type`, `decision.severity`, `decision.recommended_action`, `attacker_ip`/endpoint.
 
-## Current state vs planned
+## State (v0.6.0)
 
+- ✅ **Policy config**: a human-maintained `rule_id → action` map with an `auto` flag,
+  loaded from `RESPONSE_POLICY_FILE` ([`response_policy.py`](../src/aegis/soar/response_policy.py));
+  empty by default (no automatic action). Example:
+  [`response-policies.example.json`](../docker/node1/response-policies.example.json).
+- ✅ **Pipeline**: when an alert's rule matches a policy, the report's `decision` gains an
+  `applied_response` (`rule_id`, rendered `action`, `auto_applied`); an `auto` policy sets
+  `auto_remediation_allowed = True` while `requires_human_validation` stays `True`.
 - ✅ Report delivery to Shuffle; human-in-the-loop triage workflow template
   ([`aegis-triage-v1.json`](../docker/node1/shuffle/playbooks/aegis-triage-v1.json)).
-- ✅ `decision.auto_remediation_allowed` / `requires_human_validation` exist in the model
-  (today `auto_remediation_allowed` is always `False`).
-- ⏳ **Not yet implemented:** the `rule_id → predefined action` policy config, the
-  logic that sets `auto_remediation_allowed` from it, a report field recording the
-  **action-taken status**, and the matching Shuffle workflows.
+- ⏳ **Remaining (Shuffle side):** the workflows that read `applied_response` and actually
+  execute the containment (firewall block, account lock) + write the execution result back.
 
-**To implement** (proposed): a small human-maintained map (`rule_id → action`,
-`auto_remediation` flag), evaluated in the decision step; add an `applied_response`
-(action + status) field to the report so the card and the narrative both state, as a
-fact, that a pre-defined human action was taken for this rule code.
+## Enable it
+
+```bash
+cp docker/node1/response-policies.example.json docker/node1/response-policies.json
+# edit it: rule_id → action ({actor}/{host}/{url}), auto=true|false
+echo 'RESPONSE_POLICY_FILE=/path/in/container/response-policies.json' >> .env
+# mount the file into the middleware container, then recreate it
+```
+
+## Verify the rules in Shuffle
+
+In the `AEGIS Alerts` workflow, branch on the report fields (the middleware already
+fills them):
+
+1. **Read** `decision.applied_response` from the incoming report.
+2. **If `applied_response.auto_applied == true`** → run the containment action
+   automatically (e.g. *Block IP* = `applied_response.action` target), then post the
+   result back to the incident — the card states *"pre-approved action taken"*.
+3. **If `applied_response` is set but `auto_applied == false`** → pre-stage the action on
+   the card with a one-click *Approve* button (human confirms).
+4. **If `applied_response` is null** → normal human-in-the-loop triage (validate
+   `decision.recommended_action`).
+
+To test end-to-end: add a policy for a rule you can trigger (e.g. SSH brute force
+`5712`, `auto: true`), attack from Kali, and check the report carries
+`applied_response.auto_applied = true` and your Shuffle workflow executed the block.
