@@ -126,11 +126,11 @@ docker-ps: ## Show running services
 docker-logs: ## Follow logs for all services
 	$(COMPOSE) logs -f --tail=200
 
-docker-down: ## Stop stack
-	$(COMPOSE) down
+docker-down: ## Stop stack (incl. Shuffle profile)
+	$(COMPOSE_FULL) down
 
-docker-clean: ## Stop stack and remove volumes
-	$(COMPOSE) down -v --remove-orphans
+docker-clean: ## Stop stack and remove volumes (incl. Shuffle profile)
+	$(COMPOSE_FULL) down -v --remove-orphans
 
 docker-restart: ## Restart stack
 	$(COMPOSE) stop
