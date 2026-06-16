@@ -183,7 +183,7 @@ aegis/
 
 ## Versioning
 
-- **Current version**: `v0.4.0`
+- **Current version**: `v0.5.0`
 - **Scheme**: SemVer (`MAJOR.MINOR.PATCH`)
 - PATCH bump: automatic on every merged PR via CI
 - MINOR bump: human decision when a new feature is complete
