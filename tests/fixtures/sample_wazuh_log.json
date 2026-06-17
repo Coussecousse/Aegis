@@ -1,0 +1,12 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2026-05-19T14:32:15Z",
+  "source_agent": "WORKSTATION-03",
+  "source_ip": "192.168.1.105",
+  "rule_id": 530,
+  "rule_level": 8,
+  "rule_description": "Possible lateral movement detected",
+  "full_log": "Event Code: 4688\nCommand Line: C:\\Windows\\System32\\net.exe user admin_tmp TempPass123! /add\nUser: DOMAIN\\regular_user\nComputer: WORKSTATION-03",
+  "mitre_technique": "T1021",
+  "decoder_name": "windows-eventlog"
+}

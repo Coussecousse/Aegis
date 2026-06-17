@@ -1,0 +1,17 @@
+[
+  {
+    "rule_id": 5712,
+    "action": "Block {actor} at the firewall (SSH brute force from {actor})",
+    "auto": true
+  },
+  {
+    "rule_id": 5710,
+    "action": "Block {actor} at the firewall (repeated SSH auth failures)",
+    "auto": true
+  },
+  {
+    "rule_id": 31103,
+    "action": "Block {actor}; audit {url} on {host} for SQL injection",
+    "auto": false
+  }
+]

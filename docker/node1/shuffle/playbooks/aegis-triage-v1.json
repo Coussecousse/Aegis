@@ -1,0 +1,58 @@
+{
+  "name": "aegis-triage-v1",
+  "description": "AEGIS triage workflow requiring human validation before remediation",
+  "version": "1.2",
+  "nodes": [
+    {
+      "id": "trigger_webhook",
+      "type": "trigger.webhook",
+      "name": "Incoming AEGIS Report",
+      "config": {
+        "method": "POST",
+        "path": "/aegis/triage/v1"
+      }
+    },
+    {
+      "id": "condition_human_validation",
+      "type": "logic.condition",
+      "name": "Human Validation Required",
+      "config": {
+        "expression": "{{ trigger_webhook.body.decision.requires_human_validation == true }}"
+      }
+    },
+    {
+      "id": "notify_analyst",
+      "type": "notification.email",
+      "name": "Notify Analyst",
+      "config": {
+        "subject": "[AEGIS] {{ trigger_webhook.body.decision.severity | upper }} incident",
+        "body": "Severity: {{ trigger_webhook.body.decision.severity }}\nAction: {{ trigger_webhook.body.decision.recommended_action }}\nSource IP: {{ trigger_webhook.body.source_log.source_ip }}\nDanger Score: {{ trigger_webhook.body.risk_score.danger_score }}\nSummary: {{ trigger_webhook.body.llm_analysis.plain_language_summary }}"
+      }
+    },
+    {
+      "id": "archive_to_rabbitmq",
+      "type": "rabbitmq.publish",
+      "name": "Archive to aegis.reports",
+      "config": {
+        "exchange": "aegis.alerts",
+        "routing_key": "aegis.reports",
+        "payload": "{{ trigger_webhook.body }}"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "trigger_webhook",
+      "to": "condition_human_validation"
+    },
+    {
+      "from": "condition_human_validation",
+      "to": "notify_analyst",
+      "when": "true"
+    },
+    {
+      "from": "notify_analyst",
+      "to": "archive_to_rabbitmq"
+    }
+  ]
+}

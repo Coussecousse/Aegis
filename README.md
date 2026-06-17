@@ -7,149 +7,83 @@ Sovereign on-premise SOC orchestrator for industrial SMEs that cannot send secur
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
 
-## What Is AEGIS
+AEGIS collects security logs across your network and analyses them **on-premise** with
+local AI to detect threats — **no data ever leaves the site**. When activity looks like
+an attack it produces a plain-language incident report and waits for **explicit human
+approval** before any containment action. It is built for companies that must meet NIS 2
+without a dedicated SOC team.
 
-AEGIS collects security logs from machines and critical systems across your network. It analyzes
-them on-premise with local AI models to detect suspicious behavior without sending data outside
-your site. When activity looks like an attack, it produces a plain-language incident report and
-waits for explicit human approval before any containment action is executed. It is built for
-companies that must meet NIS 2 requirements but do not have a dedicated SOC team.
+- **100% local AI** — Ollama on a Raspberry Pi; no OpenAI/AWS/Azure/GCP, no subscription.
+- **Sovereign** — avoids foreign jurisdiction over logs (US Cloud Act) under NIS 2 / GDPR.
+- **Human-in-the-loop** — AEGIS proposes; a human validates before anything is executed.
 
-## How It Works
+**The pipeline:**
 
-1. Wazuh agents collect logs from endpoints, Active Directory, firewall devices, and databases.
-2. Logs are buffered in RabbitMQ to absorb peaks and prevent overload during an attack.
-3. TinyLlama (local SLM) performs first-pass triage and classifies events as normal or suspicious.
-4. If suspicious: the middleware queries ChromaDB (local vector database) to retrieve the business
-  context of the targeted asset — its name, role, and criticality level.
-5. Mistral 7B (local LLM) combines the raw log, the asset context from ChromaDB, and the threat
-  pattern to generate a plain-language incident report.
-6. Shuffle SOAR presents the report to the operator for explicit validation.
-7. Only after human approval, containment actions are applied (for example firewall rule updates or
-  AD account lock).
+```
+Wazuh → RabbitMQ → SLM triage → ChromaDB/UEBA context → LLM report → Shuffle SOAR → human validation
+```
 
-## Why On-Premise
+Details in [docs/middleware.md](docs/middleware.md).
 
-- Cloud platforms can place logs under foreign jurisdictions (including US Cloud Act), which is a
-  legal risk for European industrial companies under NIS 2.
-- All AI inference runs locally on a Raspberry Pi 5 with Ollama: no subscription, no external
-  dependency, and no data leaving the network.
+## Documentation
+
+Start here — each topic has its own doc:
+
+| Doc | What it covers |
+|---|---|
+| [docs/getting-started.md](docs/getting-started.md) | **Set up the project step by step + what to watch out for.** |
+| [docs/architecture.md](docs/architecture.md) | Repository map — what every file/area is for. |
+| [docs/middleware.md](docs/middleware.md) | The pipeline: stages, gates, risk scoring, reliability. |
+| [docs/ueba.md](docs/ueba.md) | Asset context: pluggable identity store, auto-update, behavioral scoring. |
+| [docs/wazuh-alerts.md](docs/wazuh-alerts.md) | The Wazuh alert format AEGIS ingests + filtering. |
+| [docs/soar-response-actions.md](docs/soar-response-actions.md) | Human-validated containment in Shuffle (current + planned). |
+| [docs/testing.md](docs/testing.md) | Test layers (unit / integration / KPI benchmarks). |
+| [docs/benchmarks/README.md](docs/benchmarks/README.md) | KPIs: targets, measured results, reproduce. |
+| [docs/makefile.md](docs/makefile.md) | Every `make` target. |
+| [docs/runbooks/poc-linux-startup.md](docs/runbooks/poc-linux-startup.md) | End-to-end POC (Juice Shop, Kali, Shuffle). |
+| [docs/raspberrypi-ollama-setup.md](docs/raspberrypi-ollama-setup.md) | Node 2 — Raspberry Pi + Ollama setup. |
+| [docs/runbooks/wazuh-rules.md](docs/runbooks/wazuh-rules.md) | Custom Wazuh detection rules. |
 
 ## Stack
 
-| Layer | Component | Version |
-|---|---|---|
-| Language | Python | 3.12 |
-| SIEM / Collection | Wazuh Manager | 4.7 |
-| Message Broker | RabbitMQ | 3.12 |
-| Local AI (triage) | Ollama — TinyLlama | 1.1B |
-| Local AI (reports) | Ollama — Mistral | 7B Q4 |
-| Vector DB / RAG | ChromaDB | 0.4.x |
-| SOAR | Shuffle SOAR | 1.2 |
-| Monitoring | Prometheus + Grafana | 2.45 / 10.4 |
-| Secrets | HashiCorp Vault (on-prem) | KMS AES-256 |
-| Containerisation | Docker Engine + Compose | latest stable |
-| CI/CD | GitHub Actions | — |
+| Layer | Component |
+|---|---|
+| Language | Python 3.12 |
+| SIEM / collection | Wazuh Manager 4.7 |
+| Message broker | RabbitMQ 3.12 |
+| Local AI | Ollama — Qwen 2.5 1.5B (triage) + Mistral 7B Q4 (reports) |
+| Vector DB / RAG | ChromaDB 0.4.x |
+| SOAR | Shuffle 1.2 |
+| Monitoring | Prometheus + Grafana |
+| Secrets | HashiCorp Vault |
+| Runtime | Docker Engine + Compose |
 
-## Infrastructure
+AEGIS runs on **two nodes**:
 
-AEGIS runs on two physical nodes:
+- **Node 1** — controller VM: all Docker services (Wazuh, RabbitMQ, ChromaDB, middleware, Shuffle, Prometheus/Grafana).
+- **Node 2** — Raspberry Pi 5: Ollama only (SLM triage + LLM reports).
 
-**Node 1 — Controller VM** (standard x86 VM on company LAN)
-Hosts: Wazuh Manager, RabbitMQ, ChromaDB, Shuffle SOAR,
-Prometheus, Grafana. All services run in Docker on an isolated
-internal network with zero outbound internet access.
+See [docs/architecture.md](docs/architecture.md).
 
-**Node 2 — AI Appliance** (Raspberry Pi 5, 16 GB RAM, ARM)
-Hosts: Ollama with TinyLlama 1.1B (triage) and Mistral 7B Q4
-(incident reports). No Docker required — Ollama runs as a native
-service. Node 1 reaches it via HTTP on the local network.
-
-Docker configuration lives in `docker/node1/`.
-See `docker/node2/README.md` for Node 2 setup instructions.
-
-## Project Status
-
-| Version | Status | Description |
-|---------|--------|-------------|
-| v0.1.0 | ✅ Released | Project scaffold, CI/CD, governance |
-| v0.2.0 | ✅ Released | Docker infrastructure (Node 1), Wazuh custom rules |
-| v0.3.x | 🔧 In progress | Python middleware, RabbitMQ consumer, LLM triage |
-| v1.0.0 | 📋 Planned | Full pipeline, NIS 2 audit validated |
-
-Current branch: `develop` — active development.
-Stable branch: `main` — mirrors last release tag.
-
-## Prerequisites
-
-- Python 3.12
-- Docker Engine
-- pre-commit (`pip install pre-commit`)
-
-## Quick Start
+## Quick start
 
 ```bash
-# Clone and enter the repo
-git clone https://github.com/Coussecousse/Aegis.git
-cd Aegis
-git checkout main
-
-# Copy and fill in secrets
-cp .env.example .env
-# Edit .env with your local passwords (see .env.example for all variables)
-
-# Start the Node 1 stack
-cd docker/node1
-docker compose up -d
-
-# Verify all services are healthy
-docker compose ps
+cp .env.example .env      # then fill every CHANGE_ME value
+make docker-build         # build middleware + collector images
+make docker-up            # start Node 1 (core); or `make docker-up-full` with Shuffle
+make docker-ps            # wait until services are healthy
 ```
 
-Once all services show `healthy`, the Wazuh Dashboard is available at
-`https://localhost:443` and Grafana at `http://localhost:3000`.
+- **Full setup** (Node 2, identity connector, attack target, gotchas) → [docs/getting-started.md](docs/getting-started.md)
+- **All `make` targets** → [docs/makefile.md](docs/makefile.md)
 
-> The AI triage pipeline (RabbitMQ → TinyLlama → Mistral → Shuffle SOAR)
-is under active development and will be available from v0.3.0.
+## Project status
 
-## Developer Setup
+**`v1.0.0`** — first stable release.<br>
+Behavioral UEBA · zero-loss reliability · LLM-authored actions · pre-approved SOAR response policies.<br>
+Active branch: `develop` · stable: `main` · full history in [CHANGELOG.md](CHANGELOG.md).
 
-```bash
-# Clone and enter the repo
-git clone https://github.com/Coussecousse/Aegis.git
-cd Aegis
-git checkout develop
-
-# Install dependencies and pre-commit hooks
-make install
-pre-commit install --install-hooks
-pre-commit install --hook-type commit-msg
-
-# Copy environment template
-cp .env.example .env
-# Edit .env with your local values
-```
-
-### Common commands
-
-| Command | Description |
-|---------|-------------|
-| `make lint` | Run Ruff linter |
-| `make format` | Check formatting (no changes) |
-| `make format-fix` | Auto-fix formatting |
-| `make typecheck` | Run Mypy strict type check |
-| `make test` | Run full test suite with coverage |
-| `make test-critical` | Run only critical path tests |
-| `make security-scan` | Run Bandit + pip-audit |
-| `make pre-commit-all` | Run all hooks on all files |
-| `make clean` | Remove cache directories |
-
-> Run `make help` for the full list.
-
-## Contributing
+## Contributing & license
 
 Read [CONTRIBUTING.md](.github/CONTRIBUTING.md) before opening a PR.
-
-## License
-
-Apache 2.0 - see [LICENSE](LICENSE).
+Licensed under Apache 2.0 — see [LICENSE](LICENSE).

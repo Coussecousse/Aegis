@@ -1,1 +1,243 @@
-{}
+{
+	"title": "AEGIS Crisis Dashboard",
+	"uid": "aegis-prometheus",
+	"schemaVersion": 39,
+	"version": 1,
+	"timezone": "browser",
+	"editable": true,
+	"refresh": "10s",
+	"time": {
+		"from": "now-6h",
+		"to": "now"
+	},
+	"panels": [
+		{
+			"id": 1,
+			"type": "timeseries",
+			"title": "Alert Processing Rate",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 0
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum by (status, severity) (rate(aegis_alerts_processed_total[5m]))",
+					"legendFormat": "{{status}}/{{severity}}"
+				}
+			]
+		},
+		{
+			"id": 2,
+			"type": "gauge",
+			"title": "Pipeline Duration p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 6,
+				"x": 12,
+				"y": 0
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))"
+				}
+			]
+		},
+		{
+			"id": 3,
+			"type": "stat",
+			"title": "Active Danger Score (by Tier)",
+			"gridPos": {
+				"h": 8,
+				"w": 6,
+				"x": 18,
+				"y": 0
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "max by (asset_criticality) (aegis_danger_score)",
+					"legendFormat": "{{asset_criticality}}"
+				}
+			]
+		},
+		{
+			"id": 4,
+			"type": "stat",
+			"title": "SOAR Delivery Success Rate",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 8
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum(increase(aegis_soar_deliveries_total{status=\"success\"}[30m])) / clamp_min(sum(increase(aegis_soar_deliveries_total[30m])), 0.0001)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percentunit"
+				},
+				"overrides": []
+			}
+		},
+		{
+			"id": 5,
+			"type": "timeseries",
+			"title": "SLM Triage Duration p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 8
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"slm\"}[5m])) by (le))",
+					"legendFormat": "p95"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "histogram_quantile(0.50, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"slm\"}[5m])) by (le))",
+					"legendFormat": "p50 (médiane)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
+		},
+		{
+			"id": 6,
+			"type": "timeseries",
+			"title": "LLM Analysis Duration p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 8
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"llm\"}[5m])) by (le))",
+					"legendFormat": "p95"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "histogram_quantile(0.50, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"llm\"}[5m])) by (le))",
+					"legendFormat": "p50 (médiane)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
+		},
+		{
+			"id": 7,
+			"type": "timeseries",
+			"title": "MTTT — Triage Duration p50/p95 (s)",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 16
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"triage\"}[5m])) by (le))",
+					"legendFormat": "p95"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "histogram_quantile(0.50, sum(rate(aegis_pipeline_duration_seconds_bucket{stage=\"triage\"}[5m])) by (le))",
+					"legendFormat": "p50 (médiane)"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
+		},
+		{
+			"id": 8,
+			"type": "timeseries",
+			"title": "Queue Depth — aegis.triage / aegis.reports",
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 16
+			},
+			"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+			"targets": [
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "A",
+					"expr": "rabbitmq_queue_messages{queue=\"aegis.triage\", vhost=\"aegis\"}",
+					"legendFormat": "aegis.triage"
+				},
+				{
+					"datasource": { "type": "prometheus", "uid": "aegis-prometheus" },
+					"refId": "B",
+					"expr": "rabbitmq_queue_messages{queue=\"aegis.reports\", vhost=\"aegis\"}",
+					"legendFormat": "aegis.reports"
+				}
+			],
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"color": { "mode": "palette-classic" },
+					"custom": { "lineWidth": 2, "fillOpacity": 10 }
+				},
+				"overrides": []
+			},
+			"options": {
+				"tooltip": { "mode": "multi", "sort": "none" },
+				"legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+			}
+		}
+	]
+}

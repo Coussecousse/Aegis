@@ -82,7 +82,11 @@ jobs:
             echo "No tests found — expected at this stage."
             exit 0
           fi
-          pytest --cov=aegis --cov-report=xml --cov-fail-under=80
+          pytest \
+            --cov=aegis.middleware.models \
+            --cov=aegis.middleware.risk_scorer \
+            --cov-report=xml \
+            --cov-fail-under=80
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4

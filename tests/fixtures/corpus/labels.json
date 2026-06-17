@@ -1,0 +1,152 @@
+{
+  "A-scan-multi-400": {
+    "scenario": "A-recon",
+    "is_attack": true,
+    "expected_rule_id": 31151,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "172.18.0.50",
+    "expected_url": "/admin",
+    "expected_min_severity": "medium",
+    "expected_action_contains": ["172.18.0.50"]
+  },
+  "B-sqli-union": {
+    "scenario": "B-sqli",
+    "is_attack": true,
+    "expected_rule_id": 31103,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "172.18.0.7",
+    "expected_url": "/rest/products/search",
+    "expected_min_severity": "high",
+    "expected_action_contains": ["172.18.0.7", "/rest/products/search"]
+  },
+  "B2-sqli-frequency": {
+    "scenario": "B-sqli",
+    "is_attack": true,
+    "expected_rule_id": 31152,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "172.18.0.7",
+    "expected_url": "/rest/products/search",
+    "expected_min_severity": "high",
+    "expected_action_contains": ["172.18.0.7", "/rest/products/search"]
+  },
+  "C-xss": {
+    "scenario": "C-xss",
+    "is_attack": true,
+    "expected_rule_id": 31154,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "172.18.0.9",
+    "expected_url": "/search",
+    "expected_min_severity": "high",
+    "expected_action_contains": ["172.18.0.9", "/search"]
+  },
+  "D-path-traversal": {
+    "scenario": "D-traversal",
+    "is_attack": true,
+    "expected_rule_id": 31153,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "192.168.1.15",
+    "expected_url": "/iisadmpwd/..%c0%af../winnt/system32/cmd.exe",
+    "expected_min_severity": "high",
+    "expected_action_contains": ["192.168.1.15"]
+  },
+  "E-command-injection": {
+    "scenario": "E-cmd-injection",
+    "is_attack": true,
+    "expected_rule_id": 31103,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "172.18.0.11",
+    "expected_url": "/api/run",
+    "expected_min_severity": "high",
+    "expected_action_contains": ["172.18.0.11", "/api/run"]
+  },
+  "F-ssh-bruteforce": {
+    "scenario": "F-bruteforce",
+    "is_attack": true,
+    "expected_rule_id": 5710,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "10.0.0.50",
+    "expected_url": null,
+    "expected_min_severity": "high",
+    "expected_action_contains": ["10.0.0.50"]
+  },
+  "I1-netstat-noise": {
+    "scenario": "I-noise",
+    "is_attack": false,
+    "expected_rule_id": 533,
+    "expected_outcome": "filtered_when_excluded",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": null,
+    "expected_action_contains": []
+  },
+  "I2-dockerd-promiscuous": {
+    "scenario": "I-noise",
+    "is_attack": false,
+    "expected_rule_id": 80710,
+    "expected_outcome": "filtered",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": null,
+    "expected_action_contains": []
+  },
+  "J-100001-ad-bruteforce": {
+    "scenario": "J-custom",
+    "is_attack": true,
+    "expected_rule_id": 100001,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": "10.0.0.88",
+    "expected_url": null,
+    "expected_min_severity": "high",
+    "expected_action_contains": ["10.0.0.88"]
+  },
+  "J-100005-tier0-on-tier2": {
+    "scenario": "J-custom",
+    "is_attack": true,
+    "expected_rule_id": 100005,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": "critical",
+    "expected_action_contains": ["WS-FACTORY-12"]
+  },
+  "J-100011-ransomware-ext": {
+    "scenario": "J-custom",
+    "is_attack": true,
+    "expected_rule_id": 100011,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": "critical",
+    "expected_action_contains": ["NAS-ENG-01"]
+  },
+  "J-100031-agent-tampering": {
+    "scenario": "J-custom",
+    "is_attack": true,
+    "expected_rule_id": 100031,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": "critical",
+    "expected_action_contains": ["WS-FACTORY-12"]
+  },
+  "J-100041-c2-outbound": {
+    "scenario": "J-custom",
+    "is_attack": true,
+    "expected_rule_id": 100041,
+    "expected_outcome": "escalate",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": "critical",
+    "expected_action_contains": ["APP-ERP-01"]
+  },
+  "K-poison-missing-fields": {
+    "scenario": "K-degraded",
+    "is_attack": false,
+    "expected_rule_id": 31103,
+    "expected_outcome": "rejected",
+    "expected_actor_ip": null,
+    "expected_url": null,
+    "expected_min_severity": null,
+    "expected_action_contains": []
+  }
+}

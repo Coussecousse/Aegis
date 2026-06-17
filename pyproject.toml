@@ -4,12 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis"
-version = "0.2.0"
+version = "1.0.0"
 description = "Sovereign on-premise SOC orchestrator for industrial SMEs"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
-dependencies = []
+dependencies = [
+  "pydantic>=2.10,<3",
+  "httpx>=0.27,<1",
+  "aio-pika>=9.5,<10",
+  "chromadb>=0.4.0,<0.5.0",
+  "prometheus-client>=0.20,<1",
+  "numpy<2",
+  "python-dotenv>=1.0,<2",
+  "ldap3>=2.9,<3",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -34,6 +43,9 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B"]
+# Benchmark harness intentionally opens localhost URLs (S310) and runs known
+# security tools via subprocess (S603/S607) against the local test target.
+"scripts/benchmark/*" = ["S310", "S603", "S607"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -47,9 +59,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--strict-markers"
+addopts = "--strict-markers -m 'not benchmark'"
 markers = [
   "critical: mark a test as covering a critical non-negotiable constraint",
+  "benchmark: KPI/benchmark tests; excluded from the default run (see make benchmark-ci)",
 ]
 
 [tool.coverage.run]

@@ -1,0 +1,163 @@
+dn: dc=industrie,dc=local
+objectClass: top
+objectClass: domain
+dc: industrie
+
+dn: ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: Computers
+
+# Parent container for named groups
+
+dn: cn=Users,dc=industrie,dc=local
+objectClass: top
+objectClass: organizationalRole
+cn: Users
+description: LDAP container for security groups and user-facing roles
+
+# Tier 0 groups
+
+dn: cn=Domain Admins,cn=Users,dc=industrie,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: Domain Admins
+description: Tier 0 privileged domain administration group
+member: cn=DC-01,ou=Computers,dc=industrie,dc=local
+member: cn=DC-02,ou=Computers,dc=industrie,dc=local
+member: cn=PKI-01,ou=Computers,dc=industrie,dc=local
+
+dn: cn=Tier1Servers,cn=Users,dc=industrie,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: Tier1Servers
+description: Tier 1 servers group for enterprise applications and infrastructure
+member: cn=ERP-01,ou=Computers,dc=industrie,dc=local
+member: cn=SCADA-01,ou=Computers,dc=industrie,dc=local
+member: cn=FS-01,ou=Computers,dc=industrie,dc=local
+member: cn=BACKUP-01,ou=Computers,dc=industrie,dc=local
+member: cn=MAIL-01,ou=Computers,dc=industrie,dc=local
+member: cn=DB-01,ou=Computers,dc=industrie,dc=local
+
+# Tier 0 assets
+
+dn: cn=DC-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: DC-01
+description: Contrôleur de domaine principal (AD DS, DNS, DHCP)
+l: 192.168.1.10
+
+
+dn: cn=DC-02,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: DC-02
+description: Contrôleur de domaine secondaire (réplication AD)
+l: 192.168.1.11
+
+
+dn: cn=PKI-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: PKI-01
+description: Serveur PKI / CA interne (certificats TLS internes)
+l: 192.168.1.12
+
+# Tier 1 assets
+
+dn: cn=ERP-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: ERP-01
+description: Serveur ERP SAP S/4HANA - données finance, RH, logistique
+l: 192.168.1.20
+
+
+dn: cn=SCADA-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: SCADA-01
+description: Serveur SCADA supervision ligne de production (Siemens WinCC)
+l: 192.168.1.21
+
+
+dn: cn=FS-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: FS-01
+description: Serveur de fichiers - partages DRH, Finance, Production
+l: 192.168.1.22
+
+
+dn: cn=BACKUP-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: BACKUP-01
+description: Serveur de sauvegarde Veeam - backup VMs et données
+l: 192.168.1.23
+
+
+dn: cn=MAIL-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: MAIL-01
+description: Serveur mail interne Exchange 2019
+l: 192.168.1.24
+
+
+dn: cn=DB-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: DB-01
+description: Serveur base de données SQL Server - données ERP et SCADA
+l: 192.168.1.25
+
+# Tier 2 assets
+
+dn: cn=WS-PROD-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: WS-PROD-01
+description: Poste opérateur ligne de production - superviseur
+l: 192.168.1.30
+
+
+dn: cn=WS-ADMIN-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: WS-ADMIN-01
+description: Poste administratif standard - comptabilité
+l: 192.168.1.31
+
+
+dn: cn=WS-IT-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: WS-IT-01
+description: Poste technicien IT - accès admin local
+l: 192.168.1.32
+
+
+dn: cn=LAPTOP-CEO,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: LAPTOP-CEO
+description: Laptop dirigeant - accès VPN, données stratégiques
+l: 192.168.1.33
+
+
+dn: cn=PRINTER-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: PRINTER-01
+description: Imprimante réseau HP - accès réseau interne
+l: 192.168.1.40
+
+
+dn: cn=IOT-SENSOR-01,ou=Computers,dc=industrie,dc=local
+objectClass: top
+objectClass: device
+cn: IOT-SENSOR-01
+description: Capteur IoT température ligne de production - firmware v2.1
+l: 192.168.1.50
