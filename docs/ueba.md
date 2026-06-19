@@ -10,10 +10,17 @@ the operator in noise and (b) prioritise what matters. It has three promises:
 
 KPIs and measured results: [benchmarks/README.md §4](benchmarks/README.md).
 
+> **Note on "RAG"**: The `rag/` module historically contained ChromaDB for vector
+> similarity search, but **AEGIS never used vector search in production**. The actual
+> use case is key-value lookup for asset profiles + time-series for UEBA behavioral
+> scoring. As of v1.0, the identity store is **PostgreSQL** with native auth,
+> encryption at rest (LUKS), and TTL enforcement — addressing security requirements
+> for NIS 2 / GDPR compliance.
+
 ## Vocabulary
 
 - **asset** — a monitored host/identity (keyed by `source_ip` / hostname).
-- **profiled** — AEGIS already has the asset's context in ChromaDB (`has_baseline=True`).
+- **profiled** — AEGIS already has the asset's context in PostgreSQL (`has_baseline=True`).
 - **criticality / tier** — privilege of the asset: `tier0` (critical, e.g. a DC) →
   `tier2` (ordinary). Drives the risk **criticality multiplier**.
 - **anomaly_score** — *behavioral* deviation in `[0,1]`, separate from privilege.
@@ -23,8 +30,8 @@ KPIs and measured results: [benchmarks/README.md §4](benchmarks/README.md).
 The store sits behind the [`BaseIdentityConnector`](../src/aegis/rag/base.py) seam.
 [`LdapConnector`](../src/aegis/rag/ldap.py) implements it for LDAP/Active Directory;
 swapping to Okta/another store is a new adapter and **nothing else changes**.
-`ChromaDBClient.sync_asset_identity()` runs the ETL: connector → `RagContext` →
-ChromaDB metadata. If the store is unreachable it degrades gracefully (default tier2
+`PostgresIdentityStore.sync_asset_identity()` runs the ETL: connector → `RagContext` →
+PostgreSQL. If the store is unreachable it degrades gracefully (default tier2
 profile), never crashing the pipeline.
 
 ## 2. Auto-update (event-driven sync)
@@ -32,7 +39,7 @@ profile), never crashing the pipeline.
 When triage sees an alert on an **unprofiled** asset, it enqueues an `identity.sync`
 job for that asset (with in-process TTL **dedup** so a burst enqueues one job). The
 [identity worker](../src/aegis/middleware/consumer_identity.py) then pulls the asset's
-context into ChromaDB. Self-limiting: once profiled, `has_baseline` flips True and
+context into PostgreSQL. Self-limiting: once profiled, `has_baseline` flips True and
 triage stops asking.
 
 ## 3. The triage gate
@@ -56,7 +63,8 @@ in the tier / criticality multiplier). A simple, explainable heuristic — no ML
   to normal (the activity becomes the "new normal").
 
 `record_activity()` updates this per alert, using the **alert's own timestamp**, and
-persists the window + baseline in ChromaDB. Worked example from a live burst:
+persists the window + baseline in PostgreSQL (`asset_profiles` table for baselines,
+`ueba_activity` partitioned table for event time-series). Worked example from a live burst:
 
 ```
 events_in_window:  1     2     3     4     5  …  14

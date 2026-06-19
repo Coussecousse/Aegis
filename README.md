@@ -20,7 +20,7 @@ without a dedicated SOC team.
 **The pipeline:**
 
 ```
-Wazuh → RabbitMQ → SLM triage → ChromaDB/UEBA context → LLM report → Shuffle SOAR → human validation
+Wazuh → RabbitMQ → SLM triage → PostgreSQL/UEBA context → LLM report → Shuffle SOAR → human validation
 ```
 
 Details in [docs/middleware.md](docs/middleware.md).
@@ -52,7 +52,7 @@ Start here — each topic has its own doc:
 | SIEM / collection | Wazuh Manager 4.7 |
 | Message broker | RabbitMQ 3.12 |
 | Local AI | Ollama — Qwen 2.5 1.5B (triage) + Mistral 7B Q4 (reports) |
-| Vector DB / RAG | ChromaDB 0.4.x |
+| Identity store | PostgreSQL 16 (asset profiles + UEBA time-series) |
 | SOAR | Shuffle 1.2 |
 | Monitoring | Prometheus + Grafana |
 | Secrets | HashiCorp Vault |
@@ -60,7 +60,7 @@ Start here — each topic has its own doc:
 
 AEGIS runs on **two nodes**:
 
-- **Node 1** — controller VM: all Docker services (Wazuh, RabbitMQ, ChromaDB, middleware, Shuffle, Prometheus/Grafana).
+- **Node 1** — controller VM: all Docker services (Wazuh, RabbitMQ, PostgreSQL, middleware, Shuffle, Prometheus/Grafana).
 - **Node 2** — Raspberry Pi 5: Ollama only (SLM triage + LLM reports).
 
 See [docs/architecture.md](docs/architecture.md).

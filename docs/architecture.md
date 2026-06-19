@@ -6,7 +6,7 @@ layer see [ueba.md](ueba.md).
 
 ## Two nodes
 
-- **Node 1 (controller VM)** — all Docker services: Wazuh, RabbitMQ, ChromaDB,
+- **Node 1 (controller VM)** — all Docker services: Wazuh, RabbitMQ, PostgreSQL,
   the Python middleware + collector, Shuffle SOAR, Prometheus/Grafana.
 - **Node 2 (Raspberry Pi)** — Ollama only (two instances: SLM triage + LLM reports).
   Setup: [raspberrypi-ollama-setup.md](raspberrypi-ollama-setup.md).
@@ -20,12 +20,13 @@ layer see [ueba.md](ueba.md).
 | `middleware/message_consumer.py` | Generic RabbitMQ consumer: connection, prefetch, reconnect, ack/nack policy, **persistent** publish. One deep module behind every stage. |
 | `middleware/consumer.py` | Triage stage processor (`aegis.triage`): SLM + RAG + gates; publishes escalations; triggers identity sync on unprofiled assets. |
 | `middleware/consumer_analysis.py` | Analysis stage processor (`aegis.reports`): LLM + risk + report + SOAR. |
-| `middleware/consumer_identity.py` | Identity-sync worker (`identity.sync`): pulls an asset's identity context into ChromaDB. |
+| `middleware/consumer_identity.py` | Identity-sync worker (`identity.sync`): pulls an asset's identity context into PostgreSQL. |
 | `middleware/pipeline.py` | The two pipeline stages: `triage_log()` and `analyze_log()`. Gates, behavioral recording, risk, decision. |
 | `middleware/prompt_builder.py` | Builds the SLM and LLM prompts (data-only; role/schema live in the Modelfiles). |
 | `middleware/risk_scorer.py` | Composite `danger_score` (SLM/LLM/rule weights × criticality multiplier × UEBA factor) + uncertainty. |
 | `middleware/models.py` | Pydantic models: `WazuhLog`, `SlmResponse`, `LlmResponse`, `RagContext`, `UEBAMetrics`, `RiskScore`, `Decision`, `AegisReport`, `EscalatedAlert`. |
-| `rag/client.py` | ChromaDB client: asset context lookup, identity sync, and **behavioral** `record_activity`. |
+| `rag/postgres_client.py` | PostgreSQL identity store: asset context lookup, identity sync, and **behavioral** `record_activity`. |
+| `rag/client.py` | Legacy ChromaDB client (deprecated, replaced by `postgres_client.py` in v1.0). |
 | `rag/ueba.py` | Pure behavioral scoring (sliding window + EWMA baseline) — the Gap 2 anomaly engine. |
 | `rag/ldap.py` | `LdapConnector` (AD-aware) implementing the `BaseIdentityConnector` seam. |
 | `rag/base.py` | `BaseIdentityConnector` — the pluggable identity-store seam (LDAP today, AD/Okta tomorrow). |
@@ -39,9 +40,10 @@ layer see [ueba.md](ueba.md).
 
 | Path | Responsibility |
 |---|---|
-| `docker-compose.yml` | Main stack (Wazuh, RabbitMQ, ChromaDB, middleware, collector, monitoring, Shuffle). |
+| `docker-compose.yml` | Main stack (Wazuh, RabbitMQ, PostgreSQL, middleware, collector, monitoring, Shuffle). |
 | `docker-compose.poc.yml` | POC OpenLDAP overlay (identity source for the demo). |
 | `docker-compose.juiceshop.yml` | Juice Shop + nginx — the realistic attack target. |
+| `postgres/init.sql` | PostgreSQL schema: `asset_profiles`, partitioned `ueba_activity`, TTL cleanup function. |
 | `rabbitmq/config/definitions.json` | Queues/exchanges/bindings: TTLs, dead-letter wiring (see the reliability section of the POC runbook). |
 | `wazuh/config/local_rules.xml` | Custom Wazuh rules (IDs 100001–100042). |
 | `grafana/`, `prometheus/` | Dashboards + scrape config. |
