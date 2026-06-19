@@ -7,7 +7,7 @@ fast SLM triage loop is never blocked behind a slow multi-minute LLM analysis:
 Stage 1 — triage_log() (consumer.py, queue aegis.triage):
 1. Send to SLM Qwen 2.5 1.5B → quick suspicion score
 2. Check if is_suspect and confidence > SUSPICION_THRESHOLD
-3. Query ChromaDB → asset context + UEBA, apply false-positive gate
+3. Query PostgreSQL → asset context + UEBA, apply false-positive gate
 4. Publish an EscalatedAlert bundle to queue aegis.reports (or discard)
 
 Stage 2 — analyze_log() (consumer_analysis.py, queue aegis.reports):
@@ -77,7 +77,7 @@ async def triage_log(
     Triage steps (strict order):
     1. SLM: Quick suspicion scoring (Qwen 2.5 1.5B)
     2. Gate: If not suspect or low confidence → discard, return None
-    3. RAG: Fetch asset context + UEBA from ChromaDB
+    3. RAG: Fetch asset context + UEBA from PostgreSQL
     4. Gate: UEBA false-positive filter → discard, return None
 
     Logs that pass both gates are bundled into an EscalatedAlert for the
@@ -86,7 +86,7 @@ async def triage_log(
     Args:
         log: WazuhLog to triage.
         ollama_client: Initialized OllamaClient for SLM inference.
-        chromadb_client: Initialized ChromaDBClient for asset context.
+        chromadb_client: Initialized identity store (ChromaDBClient or PostgresIdentityStore).
         metrics: Optional metrics collector for Prometheus reporting.
         suspicion_threshold: Minimum confidence to proceed past SLM (default: 0.5).
         slm_timeout: SLM request timeout in seconds (default: 10).

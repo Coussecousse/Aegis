@@ -5,7 +5,7 @@ Defines strict JSON structures for each pipeline step:
 - WazuhLog: raw input from RabbitMQ (raw Wazuh log)
 - SlmResponse: response from the triage SLM (Qwen 2.5 1.5B, quick suspicion score)
 - LlmResponse: response from the report LLM (Ollama, detailed report)
-- RagContext: enriched business context from ChromaDB
+- RagContext: enriched business context from identity store (PostgreSQL)
 - RiskScore: composite danger score calculation
 - AegisReport: complete final report sent to Shuffle SOAR
 
@@ -178,7 +178,7 @@ class UEBAMetrics(BaseModel):
         default=True,
         description=(
             "Whether a real behavioral baseline exists for this asset. False when "
-            "the asset is unknown to ChromaDB or has no UEBA profile yet — in which "
+            "the asset is unknown to the identity store or has no UEBA profile yet — in which "
             "case anomaly_score (0.0) means 'unknown', not 'confirmed normal', so the "
             "false-positive gate must not use it to discard a suspect alert."
         ),
@@ -224,7 +224,7 @@ class UEBAMetrics(BaseModel):
 
 
 class RagContext(BaseModel):
-    """Enriched business context from ChromaDB (asset metadata + UEBA)."""
+    """Enriched business context from identity store (asset metadata + UEBA)."""
 
     asset_name: str = Field(..., description="Unique asset identifier")
     asset_criticality: Literal["tier0", "tier1", "tier2"] = Field(

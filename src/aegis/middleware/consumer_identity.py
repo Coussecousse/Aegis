@@ -1,7 +1,7 @@
 """Identity-synchronization processor for the AEGIS pipeline.
 
 Behind :class:`MessageConsumer` (queue ``identity.sync``): for each job, resolve
-an asset identifier and sync its identity context from LDAP into ChromaDB. A
+an asset identifier and sync its identity context from LDAP into PostgreSQL. A
 transient failure dead-letters (``on_error="dead_letter"``) rather than
 requeueing forever — identity enrichment is best-effort, not the alert path.
 """

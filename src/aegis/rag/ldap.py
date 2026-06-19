@@ -185,7 +185,7 @@ class LdapConnector(BaseIdentityConnector):
                 # Privilege is carried by asset_criticality (tier) + the risk scorer's
                 # criticality multiplier — NOT by anomaly_score. anomaly_score is a
                 # purely behavioral signal that accrues from observed activity
-                # (see aegis.rag.ueba / ChromaDBClient.record_activity), so a freshly
+                # (see aegis.rag.ueba / PostgresIdentityStore.record_activity), so a freshly
                 # synced asset starts at 0.0 until its behavior says otherwise.
                 anomaly_score=0.0,
             ),

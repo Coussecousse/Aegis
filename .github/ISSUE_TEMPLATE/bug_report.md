@@ -27,7 +27,7 @@ What actually happened.
 - OS:
 - Python version:
 - Docker version:
-- Component affected (Wazuh, RabbitMQ, Ollama, ChromaDB, Shuffle SOAR, Vault, Monitoring, etc.):
+- Component affected (Wazuh, RabbitMQ, Ollama, PostgreSQL, Shuffle SOAR, Vault, Monitoring, etc.):
 
 ## Logs Snippet
 
