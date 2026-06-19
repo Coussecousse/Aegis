@@ -18,34 +18,46 @@ from aegis.middleware.message_consumer import (
     Publisher,
     UnprocessableMessageError,
 )
-from aegis.rag.client import ChromaDBClient
 from aegis.rag.ldap import LdapConfig, LdapConnector
+from aegis.rag.postgres_client import PostgresIdentityStore
 
 logger = logging.getLogger(__name__)
 
 
 class IdentityProcessor:
-    """Sync one asset's identity context from LDAP into ChromaDB."""
+    """Sync one asset's identity context from LDAP into PostgreSQL."""
 
     def __init__(
         self,
         *,
-        chromadb_host: str = "localhost",
-        chromadb_port: int = 8000,
+        postgres_host: str = "localhost",
+        postgres_port: int = 5432,
+        postgres_db: str = "aegis",
+        postgres_user: str = "aegis_app",
+        postgres_password: str = "",
         ldap_config: LdapConfig,
     ) -> None:
-        self.chromadb_host = chromadb_host
-        self.chromadb_port = chromadb_port
+        self.postgres_host = postgres_host
+        self.postgres_port = postgres_port
+        self.postgres_db = postgres_db
+        self.postgres_user = postgres_user
+        self.postgres_password = postgres_password
         self.ldap_config = ldap_config
 
         self._stack: AsyncExitStack | None = None
-        self._chroma: ChromaDBClient | None = None
+        self._postgres: PostgresIdentityStore | None = None
         self._connector: LdapConnector | None = None
 
     async def __aenter__(self) -> IdentityProcessor:
         stack = AsyncExitStack()
-        self._chroma = await stack.enter_async_context(
-            ChromaDBClient(self.chromadb_host, self.chromadb_port)
+        self._postgres = await stack.enter_async_context(
+            PostgresIdentityStore(
+                self.postgres_host,
+                self.postgres_port,
+                self.postgres_db,
+                self.postgres_user,
+                self.postgres_password,
+            )
         )
         self._connector = LdapConnector(self.ldap_config)
         self._stack = stack
@@ -58,16 +70,16 @@ class IdentityProcessor:
     async def process(self, payload: dict[str, Any], publish: Publisher) -> None:
         """Sync identity for one job (publish is unused for this stage)."""
         _ = publish
-        if self._chroma is None or self._connector is None:
+        if self._postgres is None or self._connector is None:
             raise RuntimeError("IdentityProcessor used outside its context manager")
 
         asset_id_raw = payload.get("asset_id") or payload.get("source_ip")
         if not isinstance(asset_id_raw, str) or not asset_id_raw:
             raise UnprocessableMessageError("identity payload needs a non-empty asset_id/source_ip")
 
-        success = await self._chroma.sync_asset_identity(asset_id_raw, self._connector)
+        success = await self._postgres.sync_asset_identity(asset_id_raw, self._connector)
         if not success:
-            # Transient (LDAP/ChromaDB) failure → dead-letter per the consumer policy.
+            # Transient (LDAP/Postgres) failure → dead-letter per the consumer policy.
             raise RuntimeError(f"identity sync failed for asset_id={asset_id_raw!r}")
 
 
@@ -85,8 +97,11 @@ def build_identity_consumer(settings: Settings) -> MessageConsumer:
         port=ldap.port,
     )
     processor = IdentityProcessor(
-        chromadb_host=settings.chroma.host,
-        chromadb_port=settings.chroma.port,
+        postgres_host=settings.postgres.host,
+        postgres_port=settings.postgres.port,
+        postgres_db=settings.postgres.database,
+        postgres_user=settings.postgres.user,
+        postgres_password=settings.postgres.password,
         ldap_config=ldap_config,
     )
     rmq = settings.rabbitmq

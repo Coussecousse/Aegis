@@ -48,6 +48,7 @@ from aegis.middleware.prompt_builder import (
 from aegis.middleware.risk_scorer import compute_risk_score
 from aegis.monitoring.metrics import MetricsCollector
 from aegis.rag.client import ChromaDBClient
+from aegis.rag.postgres_client import PostgresIdentityStore
 from aegis.soar.client import ShuffleClient
 from aegis.soar.response_policy import ResponsePolicy, render_action
 
@@ -62,7 +63,7 @@ _DEFAULT_LLM_MODEL = "mistral-aegis"
 async def triage_log(
     log: WazuhLog,
     ollama_client: OllamaClient,
-    chromadb_client: ChromaDBClient,
+    chromadb_client: ChromaDBClient | PostgresIdentityStore,
     metrics: MetricsCollector | None = None,
     suspicion_threshold: float = 0.5,
     slm_timeout: float = 10.0,

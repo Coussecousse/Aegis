@@ -26,7 +26,7 @@ from aegis.middleware.message_consumer import (
 from aegis.middleware.models import WazuhLog
 from aegis.middleware.pipeline import triage_log
 from aegis.monitoring.metrics import MetricsCollector
-from aegis.rag.client import ChromaDBClient
+from aegis.rag.postgres_client import PostgresIdentityStore
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,11 @@ class TriageProcessor:
         self,
         *,
         ollama_base_url: str = "http://10.0.0.1:11434",
-        chromadb_host: str = "localhost",
-        chromadb_port: int = 8000,
+        postgres_host: str = "localhost",
+        postgres_port: int = 5432,
+        postgres_db: str = "aegis",
+        postgres_user: str = "aegis_app",
+        postgres_password: str = "",
         metrics: MetricsCollector | None = None,
         suspicion_threshold: float = 0.5,
         slm_timeout: float = 10.0,
@@ -57,8 +60,11 @@ class TriageProcessor:
         fp_gate_confidence_ceiling: float = 0.6,
     ) -> None:
         self.ollama_base_url = ollama_base_url
-        self.chromadb_host = chromadb_host
-        self.chromadb_port = chromadb_port
+        self.postgres_host = postgres_host
+        self.postgres_port = postgres_port
+        self.postgres_db = postgres_db
+        self.postgres_user = postgres_user
+        self.postgres_password = postgres_password
         self.metrics = metrics
         self.suspicion_threshold = suspicion_threshold
         self.slm_timeout = slm_timeout
@@ -67,14 +73,20 @@ class TriageProcessor:
 
         self._stack: AsyncExitStack | None = None
         self._ollama: OllamaClient | None = None
-        self._chroma: ChromaDBClient | None = None
+        self._postgres: PostgresIdentityStore | None = None
         self._recently_synced: dict[str, float] = {}
 
     async def __aenter__(self) -> TriageProcessor:
         stack = AsyncExitStack()
         self._ollama = await stack.enter_async_context(OllamaClient(self.ollama_base_url))
-        self._chroma = await stack.enter_async_context(
-            ChromaDBClient(self.chromadb_host, self.chromadb_port)
+        self._postgres = await stack.enter_async_context(
+            PostgresIdentityStore(
+                self.postgres_host,
+                self.postgres_port,
+                self.postgres_db,
+                self.postgres_user,
+                self.postgres_password,
+            )
         )
         self._stack = stack
         return self
@@ -93,7 +105,7 @@ class TriageProcessor:
 
     async def process(self, payload: dict[str, Any], publish: Publisher) -> None:
         """Triage one alert; publish an EscalatedAlert when it survives the gates."""
-        if self._ollama is None or self._chroma is None:
+        if self._ollama is None or self._postgres is None:
             raise RuntimeError("TriageProcessor used outside its context manager")
 
         try:
@@ -118,7 +130,7 @@ class TriageProcessor:
         escalated = await triage_log(
             log=log,
             ollama_client=self._ollama,
-            chromadb_client=self._chroma,
+            chromadb_client=self._postgres,
             metrics=self.metrics,
             suspicion_threshold=self.suspicion_threshold,
             slm_timeout=self.slm_timeout,
@@ -150,8 +162,11 @@ def build_triage_consumer(
     rmq = settings.rabbitmq
     processor = TriageProcessor(
         ollama_base_url=settings.ollama.slm_base_url,
-        chromadb_host=settings.chroma.host,
-        chromadb_port=settings.chroma.port,
+        postgres_host=settings.postgres.host,
+        postgres_port=settings.postgres.port,
+        postgres_db=settings.postgres.database,
+        postgres_user=settings.postgres.user,
+        postgres_password=settings.postgres.password,
         metrics=metrics,
         suspicion_threshold=settings.suspicion_threshold,
         slm_timeout=settings.ollama.slm_timeout,
