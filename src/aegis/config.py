@@ -99,17 +99,23 @@ class OllamaSettings:
 
 
 @dataclass(frozen=True)
-class ChromaSettings:
-    """ChromaDB connection."""
+class PostgresSettings:
+    """PostgreSQL connection."""
 
     host: str = "localhost"
-    port: int = 8000
+    port: int = 5432
+    database: str = "aegis"
+    user: str = "aegis_app"
+    password: str = ""
 
     @classmethod
-    def from_env(cls) -> ChromaSettings:
+    def from_env(cls) -> PostgresSettings:
         return cls(
-            host=os.getenv("CHROMADB_HOST", "localhost"),
-            port=int(os.getenv("CHROMADB_PORT", "8000")),
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=os.getenv("POSTGRES_DB", "aegis"),
+            user=os.getenv("POSTGRES_USER", "aegis_app"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
         )
 
 
@@ -167,7 +173,7 @@ class Settings:
 
     rabbitmq: RabbitMQSettings = field(default_factory=RabbitMQSettings)
     ollama: OllamaSettings = field(default_factory=OllamaSettings)
-    chroma: ChromaSettings = field(default_factory=ChromaSettings)
+    postgres: PostgresSettings = field(default_factory=PostgresSettings)
     ldap: LdapSettings = field(default_factory=LdapSettings)
     wazuh: WazuhSettings = field(default_factory=WazuhSettings)
     suspicion_threshold: float = 0.5
@@ -181,7 +187,7 @@ class Settings:
         return cls(
             rabbitmq=RabbitMQSettings.from_env(),
             ollama=OllamaSettings.from_env(),
-            chroma=ChromaSettings.from_env(),
+            postgres=PostgresSettings.from_env(),
             ldap=LdapSettings.from_env(),
             wazuh=WazuhSettings.from_env(),
             suspicion_threshold=float(os.getenv("SUSPICION_THRESHOLD", "0.5")),
