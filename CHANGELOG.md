@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GDPR Article 30 processing register documentation (`docs/PRIVACY.md`)
 - LUKS full-disk encryption guide for PostgreSQL volumes (`docs/VOLUME_ENCRYPTION.md`)
 - PostgreSQL schema with `asset_profiles` and partitioned `ueba_activity` tables
-- TTL cleanup function `cleanup_expired_ueba_events()` for 90-day retention
+- TTL cleanup functions: `cleanup_expired_ueba_events()` and `cleanup_inactive_asset_profiles()`
+  with 2-year retention window per CNIL audit log requirements
+- postgres-cron sidecar container for automated daily cleanup (03:00 UTC) of expired UEBA
+  events and inactive asset profiles, ensuring GDPR Article 5.1.e compliance (data minimization)
 
 ### Removed
 - ChromaDB dependency and service from docker-compose stack
