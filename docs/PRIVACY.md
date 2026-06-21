@@ -1,6 +1,6 @@
 # AEGIS — GDPR Article 30 Processing Register
 
-**Controller:** [Organization]  
+**Controller:** [Organization]
 **DPO:** [Name / Contact]
 
 ## 1. Purpose
@@ -22,8 +22,12 @@ SOC operators + incident response teams only. **No external sharing.**
 **None.** 100% on-premise, no cloud.
 
 ## 5. Retention
-- **Asset profiles:** Active while asset is monitored; deleted on decommission.
-- **UEBA events:** **90 days** (automated TTL via `cleanup_expired_ueba_events()` SQL function).
+| Category | Retention | Automation |
+|---|---|---|
+| **UEBA events** | 2 years (CNIL audit log requirement) | Daily cleanup at 03:00 UTC via `postgres-cron` container (`cleanup_expired_ueba_events()`) |
+| **Asset profiles** | Deleted after 2 years of inactivity | Daily cleanup at 03:00 UTC via `postgres-cron` container (`cleanup_inactive_asset_profiles()`) |
+| **Alert logs (Wazuh)** | 7 days (defined in `ossec.conf`) | Wazuh internal rotation |
+| **Middleware audit logs** | 2 years (CNIL audit log requirement) | Manual review and deletion |
 
 ## 6. Legal Basis
 Article 6(1)(f) — legitimate interest (NIS 2 cybersecurity obligation).
