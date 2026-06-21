@@ -14,7 +14,7 @@ def test_postgres_identity_store_init_stores_parameters() -> None:
         port=5433,
         database="test_db",
         user="test_user",
-        password="test_pass",
+        password="test_pass",  # pragma: allowlist secret
         timeout=10.0,
     )
 
@@ -22,7 +22,7 @@ def test_postgres_identity_store_init_stores_parameters() -> None:
     assert store.port == 5433
     assert store.database == "test_db"
     assert store.user == "test_user"
-    assert store.password == "test_pass"
+    assert store.password == "test_pass"  # pragma: allowlist secret
     assert store.timeout == 10.0
     assert store._pool is None
 
