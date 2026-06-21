@@ -51,16 +51,37 @@ BEFORE UPDATE ON asset_profiles
 FOR EACH ROW
 EXECUTE FUNCTION update_asset_timestamp();
 
--- TTL cleanup function: purge ueba_activity > 90 days (called by cron or pg_cron)
--- Deletes from partitions, then VACUUM to reclaim space
+-- TTL cleanup function: purge ueba_activity > 2 years (called by cron or pg_cron)
+-- Retention: 2 years for audit logs per CNIL requirements
 CREATE OR REPLACE FUNCTION cleanup_expired_ueba_events()
 RETURNS TABLE(deleted_count BIGINT) AS $$
 DECLARE
     cutoff TIMESTAMPTZ;
     result BIGINT;
 BEGIN
-    cutoff := NOW() - INTERVAL '90 days';
+    cutoff := NOW() - INTERVAL '2 years';
     DELETE FROM ueba_activity WHERE created_at < cutoff;
+    GET DIAGNOSTICS result = ROW_COUNT;
+    RETURN QUERY SELECT result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- TTL cleanup function: purge asset_profiles with no activity in 2 years
+-- Inactive assets (no ueba_activity in 2 years) are candidates for deletion (GDPR minimization)
+CREATE OR REPLACE FUNCTION cleanup_inactive_asset_profiles()
+RETURNS TABLE(deleted_count BIGINT) AS $$
+DECLARE
+    cutoff TIMESTAMPTZ;
+    result BIGINT;
+BEGIN
+    cutoff := NOW() - INTERVAL '2 years';
+    DELETE FROM asset_profiles
+    WHERE asset_id IN (
+        SELECT ap.asset_id
+        FROM asset_profiles ap
+        LEFT JOIN ueba_activity ua ON ap.asset_id = ua.asset_id AND ua.created_at >= cutoff
+        WHERE ua.asset_id IS NULL
+    );
     GET DIAGNOSTICS result = ROW_COUNT;
     RETURN QUERY SELECT result;
 END;
