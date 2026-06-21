@@ -40,10 +40,12 @@ layer see [ueba.md](ueba.md).
 
 | Path | Responsibility |
 |---|---|
-| `docker-compose.yml` | Main stack (Wazuh, RabbitMQ, PostgreSQL, middleware, collector, monitoring, Shuffle). |
+| `docker-compose.yml` | Main stack (Wazuh, RabbitMQ, PostgreSQL, postgres-cron, middleware, collector, monitoring, Shuffle). |
 | `docker-compose.poc.yml` | POC OpenLDAP overlay (identity source for the demo). |
 | `docker-compose.juiceshop.yml` | Juice Shop + nginx — the realistic attack target. |
-| `postgres/init.sql` | PostgreSQL schema: `asset_profiles`, partitioned `ueba_activity`, TTL cleanup function. |
+| `postgres/init.sql` | PostgreSQL schema: `asset_profiles`, partitioned `ueba_activity`, TTL cleanup functions (`cleanup_expired_ueba_events`, `cleanup_inactive_asset_profiles`). |
+| `postgres-cron/Dockerfile` | Sidecar cron container: runs daily cleanup at 03:00 UTC (GDPR Article 5.1.e minimization). |
+| `postgres-cron/cleanup.sh` | Cleanup script: purges UEBA events + inactive profiles > 2 years. |
 | `rabbitmq/config/definitions.json` | Queues/exchanges/bindings: TTLs, dead-letter wiring (see the reliability section of the POC runbook). |
 | `wazuh/config/local_rules.xml` | Custom Wazuh rules (IDs 100001–100042). |
 | `grafana/`, `prometheus/` | Dashboards + scrape config. |
