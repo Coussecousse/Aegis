@@ -6,7 +6,7 @@
 
 ## Project Summary
 
-AEGIS is a sovereign, 100% open-source, on-premise SOC orchestrator designed for industrial SMEs
+AEGIS is a sovereign, 100% open-source, on-premise XDR orchestrator designed for industrial SMEs
 that cannot send data to the Cloud (NIS 2, GDPR, Cloud Act constraints). It detects threats in
 real time via a local AI, translates alerts into plain language, and proposes remediation actions
 that require explicit human validation before execution. No data ever leaves the perimeter.

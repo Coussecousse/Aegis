@@ -16,7 +16,7 @@ Cybersecurity threat detection (GDPR Article 6(1)(f) — legitimate interest und
 **No special categories** (Article 9).
 
 ## 3. Recipients
-SOC operators + incident response teams only. **No external sharing.**
+XDR operators + incident response teams only. **No external sharing.**
 
 ## 4. Transfers
 **None.** 100% on-premise, no cloud.

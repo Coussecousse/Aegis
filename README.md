@@ -1,6 +1,6 @@
 # AEGIS
 
-Sovereign on-premise SOC orchestrator for industrial SMEs that cannot send security data to the Cloud.
+Sovereign on-premise XDR orchestrator for industrial SMEs that cannot send security data to the Cloud.
 
 [![CI](https://github.com/Coussecousse/Aegis/actions/workflows/ci.yml/badge.svg)](https://github.com/Coussecousse/Aegis/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -11,7 +11,7 @@ AEGIS collects security logs across your network and analyses them **on-premise*
 local AI to detect threats — **no data ever leaves the site**. When activity looks like
 an attack it produces a plain-language incident report and waits for **explicit human
 approval** before any containment action. It is built for companies that must meet NIS 2
-without a dedicated SOC team.
+without a dedicated XDR team.
 
 - **100% local AI** — Ollama on a Raspberry Pi; no OpenAI/AWS/Azure/GCP, no subscription.
 - **Sovereign** — avoids foreign jurisdiction over logs (US Cloud Act) under NIS 2 / GDPR.

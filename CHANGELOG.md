@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-06-16
 
-First stable release. AEGIS is a sovereign, 100% on-premise SOC orchestrator:
+First stable release. AEGIS is a sovereign, 100% on-premise XDR orchestrator:
 Wazuh → RabbitMQ → local SLM triage → PostgreSQL/UEBA context → local LLM report →
 Shuffle SOAR, with mandatory human validation and zero cloud calls. Highlights across
 the 0.4–0.6 line: the Wazuh→RabbitMQ collector, Prometheus/Grafana observability and
