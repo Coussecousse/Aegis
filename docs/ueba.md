@@ -75,6 +75,34 @@ baseline (EWMA):  1.0   1.2   1.56  2.05  2.64 … 10.2
 The score feeds the risk math via `ueba_factor = 0.70 + anomaly_score × 0.30`: an
 asset deviating from its baseline gets a higher `danger_score`; a calm one is damped.
 
+### How EWMA baseline learns: technical details
+
+The baseline is **not a moving average of recent activity** — it's an **exponential weighted moving average (EWMA)** that adapts gradually as behavior changes.
+
+**Formula** (`rag/ueba.py:76`):
+```
+baseline_new = (1 - α) × baseline_old + α × recent_count
+```
+
+Where:
+- `α` (**alpha**) = `DEFAULT_BASELINE_ALPHA = 0.2` (20% weight to new observation)
+- `baseline_old` = the learned "normal" rate from before this alert
+- `recent_count` = events observed in the last 5 minutes
+- `baseline_new` = updated baseline, rounded to 3 decimals
+
+**Why this works**:
+1. **Gradual adaptation** — `α=0.2` means new activity is weighted at 20%, old baseline at 80%. A single anomalous spike doesn't flip the baseline.
+2. **Sustained activity becomes normal** — if high activity *continues*, the baseline gradually rises (0.2 per alert) until it matches the new normal, and `anomaly_score` decays back to ~0.
+3. **Self-healing** — when activity drops back to baseline, the score returns to 0 without manual reset.
+
+**Example walkthrough** (from the table above):
+- Initial: baseline = 1.0, recent_count = 1 → `baseline_new = 0.8×1.0 + 0.2×1 = 1.0` → anomaly_score = 0
+- Event 2: recent_count = 2 → `baseline_new = 0.8×1.0 + 0.2×2 = 1.2` → anomaly_score = (2-1)/(1×2) = 0.50
+- Event 3: recent_count = 3 → `baseline_new = 0.8×1.2 + 0.2×3 = 1.56` → anomaly_score = (3-1.2)/(1.2×2) = 0.75
+- Event 14: recent_count = 14 → `baseline_new = 0.8×10.2 + 0.2×14 ≈ 10.96` → anomaly_score = (14-10.2)/(10.2×2) ≈ 0.19 **(decay)**
+
+**Floor behavior** — baseline never drops below `_MIN_BASELINE = 1.0`, so a newly-seen quiet asset isn't hyper-sensitive to 1–2 events.
+
 ### How it shows up in a report
 
 ```jsonc
