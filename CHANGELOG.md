@@ -7,10 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: Migrated identity store from ChromaDB to PostgreSQL for GDPR compliance
+  and security. PostgreSQL provides native authentication, encryption at rest (LUKS),
+  TTL enforcement via SQL functions, and eliminates the need for a vector database
+  (AEGIS never used vector similarity search in production). The `rag/` module now
+  contains `postgres_client.py` with the same interface as the legacy `client.py`.
+
+### Added
+- GDPR Article 30 processing register documentation (`docs/PRIVACY.md`)
+- LUKS full-disk encryption guide for PostgreSQL volumes (`docs/VOLUME_ENCRYPTION.md`)
+- PostgreSQL schema with `asset_profiles` and partitioned `ueba_activity` tables
+- TTL cleanup functions: `cleanup_expired_ueba_events()` and `cleanup_inactive_asset_profiles()`
+  with 2-year retention window per CNIL audit log requirements
+- postgres-cron sidecar container for automated daily cleanup (03:00 UTC) of expired UEBA
+  events and inactive asset profiles, ensuring GDPR Article 5.1.e compliance (data minimization)
+
+### Removed
+- ChromaDB dependency and service from docker-compose stack
+
 ## [1.0.0] - 2026-06-16
 
-First stable release. AEGIS is a sovereign, 100% on-premise SOC orchestrator:
-Wazuh → RabbitMQ → local SLM triage → ChromaDB/UEBA context → local LLM report →
+First stable release. AEGIS is a sovereign, 100% on-premise XDR orchestrator:
+Wazuh → RabbitMQ → local SLM triage → PostgreSQL/UEBA context → local LLM report →
 Shuffle SOAR, with mandatory human validation and zero cloud calls. Highlights across
 the 0.4–0.6 line: the Wazuh→RabbitMQ collector, Prometheus/Grafana observability and
 Vault secrets (0.4); behavioral UEBA, zero-loss reliability and LLM-authored actions

@@ -95,7 +95,7 @@ def _entered_triage_processor() -> TriageProcessor:
     """A TriageProcessor with fake clients injected (bypassing __aenter__)."""
     proc = TriageProcessor()
     proc._ollama = object()  # type: ignore[assignment]  # noqa: SLF001
-    proc._chroma = object()  # type: ignore[assignment]  # noqa: SLF001
+    proc._postgres = object()  # type: ignore[assignment]  # noqa: SLF001
     return proc
 
 

@@ -29,7 +29,7 @@ Native compliance: NIS 2 / AI Act / RGPD.
 ```
 Wazuh 4.7 → RabbitMQ 3.12 (queue: aegis.triage)
   → Python middleware (consumer → SLM → RAG → LLM → risk_scorer → SOAR)
-  → ChromaDB 0.4.x (RAG + UEBA)
+  → PostgreSQL 16 (identity store + UEBA time-series)
   → Shuffle SOAR 1.2
   → Prometheus + Grafana
 ```
@@ -59,7 +59,7 @@ Stage 1 — triage (queue `aegis.triage`, fast):
 1. WazuhLog ← RabbitMQ consumer (aio-pika, persistent msgs)
 2. SLM Qwen 2.5 1.5B → SlmResponse (evaluates rule content from level 6 up)
 3. Suspicion gate: not is_suspect or confidence < SUSPICION_THRESHOLD → discard
-4. ChromaDB record_activity → RagContext + UEBA; updates BEHAVIORAL anomaly_score
+4. PostgreSQL record_activity → RagContext + UEBA; updates BEHAVIORAL anomaly_score
    (sliding window + EWMA baseline, rag/ueba.py); unprofiled asset → enqueue identity.sync
 5. UEBA FP gate: discard only if baseline-normal AND low rule level AND non-critical
    AND SLM confidence < FP_GATE_CONFIDENCE_CEILING (a confident suspicion always escalates)
@@ -123,7 +123,8 @@ Reliability: durable queues, persistent messages, 1 h TTL + dead-letter to
 | `middleware/prompt_builder.py` | ✅ SLM 300 chars, LLM 500 chars |
 | `middleware/risk_scorer.py` | ✅ Composite formula + uncertainty |
 | `llm/client.py` | ✅ Async, retry 1s/2s/4s, defensive JSON parse |
-| `rag/client.py` | ✅ Async ChromaDB metadata client with defensive fallback |
+| `rag/client.py` | ✅ Legacy ChromaDB client (deprecated in v1.0, replaced by postgres_client.py) |
+| `rag/postgres_client.py` | ✅ Async PostgreSQL identity store with defensive fallback |
 | `soar/client.py` | ✅ Async webhook, retry |
 | `collectors/wazuh_forwarder.py` | ✅ Wazuh JSON mapping + RabbitMQ publish bridge |
 | `collectors/__main__.py` | ✅ Integration mode + daemon mode for alerts.json polling |
@@ -151,7 +152,7 @@ Reliability: durable queues, persistent messages, 1 h TTL + dead-letter to
 ## Tech Stack
 
 ```
-Python 3.12 | Pydantic v2 | httpx async | aio-pika | ChromaDB | Docker Compose
+Python 3.12 | Pydantic v2 | httpx async | aio-pika | asyncpg (PostgreSQL) | Docker Compose
 Ruff | Mypy strict | Pytest | Bandit | detect-secrets | pre-commit
 ```
 

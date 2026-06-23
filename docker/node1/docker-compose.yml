@@ -152,26 +152,45 @@ services:
     networks:
       - aegis-internal
 
-  chromadb:
-    image: chromadb/chroma:0.4.24
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "5432:5432"
     volumes:
-      - chromadb-data:/chroma/chroma
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     environment:
-      CHROMA_SERVER_HOST: 0.0.0.0
-      CHROMA_SERVER_HTTP_PORT: 8000
-      IS_PERSISTENT: "TRUE"
-      ANONYMIZED_TELEMETRY: "FALSE"
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat', timeout=5)\" || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegis_app} -d ${POSTGRES_DB:-aegis}"]
       interval: 30s
       timeout: 10s
       retries: 5
     networks:
       - aegis-internal
       - aegis-monitoring
+
+  postgres-cron:
+    build:
+      context: ./postgres-cron
+      dockerfile: Dockerfile
+    container_name: aegis-postgres-cron
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - aegis-internal
 
   middleware:
     build:
@@ -187,8 +206,11 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-aegis}
       RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-aegis.triage}
-      CHROMADB_HOST: chromadb
-      CHROMADB_PORT: ${CHROMADB_PORT:-8000}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       OLLAMA_SLM_BASE_URL: ${OLLAMA_SLM_BASE_URL}
       OLLAMA_LLM_BASE_URL: ${OLLAMA_LLM_BASE_URL}
       SLM_MODEL: ${SLM_MODEL}
@@ -211,7 +233,7 @@ services:
         condition: service_healthy
       rabbitmq-bootstrap:
         condition: service_completed_successfully
-      chromadb:
+      postgres:
         condition: service_healthy
     networks:
       - aegis-internal
@@ -373,7 +395,7 @@ volumes:
   wazuh-dashboard-config:
   wazuh-dashboard-custom:
   rabbitmq-data:
-  chromadb-data:
+  postgres-data:
   shuffle-data:
   shuffle-apps:
   prometheus-data:

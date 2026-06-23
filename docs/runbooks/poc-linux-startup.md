@@ -27,13 +27,12 @@ docker exec -i aegis-poc-openldap-1 ldapadd -c \
   < scripts/poc/seed_ldap.ldif                        # 15 assets (3 tier0)
 ```
 
-Sync LDAP → ChromaDB by publishing one `identity.sync` per asset to the
+Sync LDAP → PostgreSQL by publishing one `identity.sync` per asset to the
 `aegis.alerts` exchange (routing key `identity.sync`), then verify:
 
 ```bash
-COLL_ID=$(curl -s http://localhost:8000/api/v1/collections \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
-curl -s "http://localhost:8000/api/v1/collections/$COLL_ID/count"   # expect 15
+docker exec -i aegis-node1-postgres-1 psql -U aegis_app -d aegis \
+  -c "SELECT COUNT(*) FROM asset_profiles;"   # expect 15
 ```
 
 The DC/PKI assets must come back `tier0`. See [ueba.md](../ueba.md) for the connector.

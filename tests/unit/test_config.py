@@ -12,7 +12,7 @@ def test_settings_defaults_when_env_absent(monkeypatch: pytest.MonkeyPatch) -> N
         "RABBITMQ_HOST",
         "RABBITMQ_PORT",
         "RABBITMQ_QUEUE",
-        "CHROMADB_PORT",
+        "POSTGRES_PORT",
         "WAZUH_EXCLUDED_RULES",
         "SUSPICION_THRESHOLD",
     ):
@@ -24,7 +24,7 @@ def test_settings_defaults_when_env_absent(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.rabbitmq.port == 5672
     assert settings.rabbitmq.triage_queue == "aegis.triage"
     assert settings.rabbitmq.exchange == "aegis.alerts"
-    assert settings.chroma.port == 8000
+    assert settings.postgres.port == 5432
     assert settings.wazuh.excluded_rules == frozenset()
     assert settings.suspicion_threshold == 0.5
 
@@ -32,7 +32,7 @@ def test_settings_defaults_when_env_absent(monkeypatch: pytest.MonkeyPatch) -> N
 def test_settings_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RABBITMQ_HOST", "rabbit.internal")
     monkeypatch.setenv("RABBITMQ_PORT", "5673")
-    monkeypatch.setenv("CHROMADB_PORT", "9000")
+    monkeypatch.setenv("POSTGRES_PORT", "9000")
     monkeypatch.setenv("SUSPICION_THRESHOLD", "0.7")
     monkeypatch.setenv("SLM_MODEL", "slm-custom")
     monkeypatch.setenv("LLM_MODEL", "mistral-custom")
@@ -42,7 +42,7 @@ def test_settings_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert settings.rabbitmq.host == "rabbit.internal"
     assert settings.rabbitmq.port == 5673
-    assert settings.chroma.port == 9000
+    assert settings.postgres.port == 9000
     assert settings.suspicion_threshold == 0.7
     assert settings.ollama.slm_model == "slm-custom"
     assert settings.ollama.llm_model == "mistral-custom"

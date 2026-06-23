@@ -8,7 +8,7 @@ are listed in [makefile.md](makefile.md).
 
 ## Topology
 
-- **Node 1 (controller VM)** — all Docker services (Wazuh, RabbitMQ, ChromaDB, the
+- **Node 1 (controller VM)** — all Docker services (Wazuh, RabbitMQ, PostgreSQL, the
   middleware + collector, Shuffle, Prometheus/Grafana).
 - **Node 2 (Raspberry Pi)** — Ollama only (SLM triage + LLM reports), reached over
   the LAN/WireGuard. AEGIS makes **zero cloud calls** — all inference is local.
@@ -31,7 +31,7 @@ are listed in [makefile.md](makefile.md).
 3. **Start Node 1** — `make docker-up` (core) or `make docker-up-full` (with Shuffle).
    Wait until `make docker-ps` shows services `healthy`.
 4. **Identity source (UEBA)** — start the LDAP overlay (`make docker-poc-up`) and seed
-   it, then sync identities into ChromaDB. UEBA needs a working **identity connector**
+   it, then sync identities into PostgreSQL. UEBA needs a working **identity connector**
    (see gotchas).
 5. **Attack target (POC)** — `make docker-juiceshop-up` exposes Juice Shop + nginx on
    `:9080`; point the Wazuh agent at the nginx access log (see the POC runbook).
@@ -44,7 +44,7 @@ are listed in [makefile.md](makefile.md).
   identity store via the `BaseIdentityConnector` seam (LDAP today). Without a reachable
   store, assets fall back to a default `tier2` profile (it degrades gracefully but you
   lose criticality/behaviour context). Make sure the connector config in `.env` points
-  at a live store and that the LDAP→ChromaDB sync has run. See [ueba.md](ueba.md).
+  at a live store and that the LDAP→PostgreSQL sync has run. See [ueba.md](ueba.md).
 - **Node 2 must be reachable and the models created.** If Ollama is down or the
   `qwen25-aegis` / `mistral-aegis` models are missing, triage/analysis fail. Confirm
   with the connectivity check in the Pi setup doc.

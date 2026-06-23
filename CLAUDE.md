@@ -6,7 +6,7 @@
 
 ## Project Summary
 
-AEGIS is a sovereign, 100% open-source, on-premise SOC orchestrator designed for industrial SMEs
+AEGIS is a sovereign, 100% open-source, on-premise XDR orchestrator designed for industrial SMEs
 that cannot send data to the Cloud (NIS 2, GDPR, Cloud Act constraints). It detects threats in
 real time via a local AI, translates alerts into plain language, and proposes remediation actions
 that require explicit human validation before execution. No data ever leaves the perimeter.
@@ -22,7 +22,7 @@ that require explicit human validation before execution. No data ever leaves the
 | Message Broker | RabbitMQ | 3.12 |
 | Local AI (triage) | Ollama — Qwen 2.5 | 1.5B |
 | Local AI (reports) | Ollama — Mistral | 7B Q4 |
-| Vector DB / RAG | ChromaDB | 0.4.x |
+| Identity Store | PostgreSQL | 16 |
 | SOAR | Shuffle SOAR | 1.2 |
 | Monitoring | Prometheus + Grafana | 2.45 / 10.4 |
 | Secrets | HashiCorp Vault (on-prem) | KMS AES-256 |
@@ -157,7 +157,7 @@ aegis/
 │       ├── middleware/         # Orchestration core
 │       ├── collectors/         # Wazuh / log ingest adapters
 │       ├── llm/                # Ollama interface (triage + reports)
-│       ├── rag/                # ChromaDB interface
+│       ├── rag/                # Identity store (PostgreSQL) + UEBA behavioral scoring
 │       ├── soar/               # Shuffle SOAR playbook triggers
 │       ├── vault/              # HashiCorp Vault client
 │       └── monitoring/         # Prometheus metrics

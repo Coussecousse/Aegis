@@ -78,4 +78,4 @@ Privilege (criticality) and behavior (anomaly) are **separate** inputs — see
 
 Key env vars (full list in `.env.example`): `SUSPICION_THRESHOLD`,
 `FP_GATE_CONFIDENCE_CEILING`, `SLM_MODEL` / `LLM_MODEL`, `LLM_USE_SCHEMA`,
-`WAZUH_MIN_LEVEL`, `SHUFFLE_WEBHOOK_URL`, RabbitMQ / ChromaDB / Ollama endpoints.
+`WAZUH_MIN_LEVEL`, `SHUFFLE_WEBHOOK_URL`, RabbitMQ / PostgreSQL / Ollama endpoints.
