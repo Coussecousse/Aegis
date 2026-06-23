@@ -1,6 +1,6 @@
 # AEGIS
 
-Sovereign on-premise SOC orchestrator for industrial SMEs that cannot send security data to the Cloud.
+Sovereign on-premise XDR orchestrator for industrial SMEs that cannot send security data to the Cloud.
 
 [![CI](https://github.com/Coussecousse/Aegis/actions/workflows/ci.yml/badge.svg)](https://github.com/Coussecousse/Aegis/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -11,7 +11,7 @@ AEGIS collects security logs across your network and analyses them **on-premise*
 local AI to detect threats — **no data ever leaves the site**. When activity looks like
 an attack it produces a plain-language incident report and waits for **explicit human
 approval** before any containment action. It is built for companies that must meet NIS 2
-without a dedicated SOC team.
+without a dedicated XDR team.
 
 - **100% local AI** — Ollama on a Raspberry Pi; no OpenAI/AWS/Azure/GCP, no subscription.
 - **Sovereign** — avoids foreign jurisdiction over logs (US Cloud Act) under NIS 2 / GDPR.
@@ -20,7 +20,7 @@ without a dedicated SOC team.
 **The pipeline:**
 
 ```
-Wazuh → RabbitMQ → SLM triage → ChromaDB/UEBA context → LLM report → Shuffle SOAR → human validation
+Wazuh → RabbitMQ → SLM triage → PostgreSQL/UEBA context → LLM report → Shuffle SOAR → human validation
 ```
 
 Details in [docs/middleware.md](docs/middleware.md).
@@ -52,7 +52,7 @@ Start here — each topic has its own doc:
 | SIEM / collection | Wazuh Manager 4.7 |
 | Message broker | RabbitMQ 3.12 |
 | Local AI | Ollama — Qwen 2.5 1.5B (triage) + Mistral 7B Q4 (reports) |
-| Vector DB / RAG | ChromaDB 0.4.x |
+| Identity store | PostgreSQL 16 (asset profiles + UEBA time-series) |
 | SOAR | Shuffle 1.2 |
 | Monitoring | Prometheus + Grafana |
 | Secrets | HashiCorp Vault |
@@ -60,7 +60,7 @@ Start here — each topic has its own doc:
 
 AEGIS runs on **two nodes**:
 
-- **Node 1** — controller VM: all Docker services (Wazuh, RabbitMQ, ChromaDB, middleware, Shuffle, Prometheus/Grafana).
+- **Node 1** — controller VM: all Docker services (Wazuh, RabbitMQ, PostgreSQL, middleware, Shuffle, Prometheus/Grafana).
 - **Node 2** — Raspberry Pi 5: Ollama only (SLM triage + LLM reports).
 
 See [docs/architecture.md](docs/architecture.md).

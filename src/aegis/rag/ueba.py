@@ -13,7 +13,7 @@ baseline — not an ML engine, which keeps it explainable and POC-appropriate:
 - the baseline slowly follows the observed rate (EWMA), so sustained activity
   becomes the new normal and the score decays back toward 0 on its own.
 
-All functions are pure so they are unit-tested without ChromaDB or a live run.
+All functions are pure so they are unit-tested without database dependencies or a live run.
 """
 
 from __future__ import annotations

@@ -18,7 +18,7 @@ Describe alternatives or workarounds you considered.
 
 ## Affected Stack Component
 
-Which component is impacted? (Wazuh, RabbitMQ, Ollama, ChromaDB, Shuffle SOAR, Vault, Monitoring, etc.)
+Which component is impacted? (Wazuh, RabbitMQ, Ollama, PostgreSQL, Shuffle SOAR, Vault, Monitoring, etc.)
 
 ## Outbound Network Call Impact
 

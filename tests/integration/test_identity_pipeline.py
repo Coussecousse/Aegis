@@ -127,7 +127,7 @@ async def test_identity_sync_pipeline_applies_tier0_multiplier_and_human_gate() 
     identity_processor = IdentityProcessor(
         ldap_config=LdapConfig(host="x", base_dn="dc=x", bind_dn="", bind_password="")
     )
-    identity_processor._chroma = chroma  # type: ignore[assignment]  # noqa: SLF001
+    identity_processor._postgres = chroma  # type: ignore[assignment]  # noqa: SLF001
     identity_processor._connector = connector  # type: ignore[assignment]  # noqa: SLF001
 
     async def _publish(routing_key: str, body: bytes) -> None:  # pragma: no cover
