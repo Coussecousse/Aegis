@@ -126,7 +126,7 @@ checks — measured deterministically and written to `kpi-ci-latest.json`.
 ### 4.2 Behavioral anomaly score — Gap 2 (measured)
 
 `anomaly_score` is now a **behavioral** signal (trailing event window + EWMA
-baseline in `aegis.rag.ueba`), decoupled from privilege — privilege stays in the
+baseline in `aegis.identity_store.ueba`), decoupled from privilege — privilege stays in the
 asset tier / risk-scorer criticality multiplier. A burst above an asset's own
 baseline raises the score; sustained load is absorbed back to normal.
 

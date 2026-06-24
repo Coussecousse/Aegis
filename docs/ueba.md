@@ -10,12 +10,10 @@ the operator in noise and (b) prioritise what matters. It has three promises:
 
 KPIs and measured results: [benchmarks/README.md §4](benchmarks/README.md).
 
-> **Note on "RAG"**: The `rag/` module historically contained ChromaDB for vector
-> similarity search, but **AEGIS never used vector search in production**. The actual
-> use case is key-value lookup for asset profiles + time-series for UEBA behavioral
-> scoring. As of v1.0, the identity store is **PostgreSQL** with native auth,
-> encryption at rest (LUKS), and TTL enforcement — addressing security requirements
-> for NIS 2 / GDPR compliance.
+> The `identity_store/` module handles key-value lookup for asset profiles +
+> time-series for UEBA behavioral scoring. The identity store is **PostgreSQL**
+> with native auth, encryption at rest (LUKS), and TTL enforcement — addressing
+> security requirements for NIS 2 / GDPR compliance.
 
 ## Vocabulary
 
@@ -27,8 +25,8 @@ KPIs and measured results: [benchmarks/README.md §4](benchmarks/README.md).
 
 ## 1. Pluggable identity store
 
-The store sits behind the [`BaseIdentityConnector`](../src/aegis/rag/base.py) seam.
-[`LdapConnector`](../src/aegis/rag/ldap.py) implements it for LDAP/Active Directory;
+The store sits behind the [`BaseIdentityConnector`](../src/aegis/identity_store/base.py) seam.
+[`LdapConnector`](../src/aegis/identity_store/ldap.py) implements it for LDAP/Active Directory;
 swapping to Okta/another store is a new adapter and **nothing else changes**.
 `PostgresIdentityStore.sync_asset_identity()` runs the ETL: connector → `RagContext` →
 PostgreSQL. If the store is unreachable it degrades gracefully (default tier2
@@ -51,7 +49,7 @@ suspicious (confidence < `FP_GATE_CONFIDENCE_CEILING`, default 0.6). So genuine 
 on a calm ordinary host is dropped, but a **confident** detection — or anything on a
 critical asset — always escalates.
 
-## 4. Behavioral scoring — Gap 2 ([`rag/ueba.py`](../src/aegis/rag/ueba.py))
+## 4. Behavioral scoring — Gap 2 ([`identity_store/ueba.py`](../src/aegis/identity_store/ueba.py))
 
 `anomaly_score` is a **behavioral** signal, decoupled from privilege (privilege lives
 in the tier / criticality multiplier). A simple, explainable heuristic — no ML:
@@ -79,7 +77,7 @@ asset deviating from its baseline gets a higher `danger_score`; a calm one is da
 
 The baseline is **not a moving average of recent activity** — it's an **exponential weighted moving average (EWMA)** that adapts gradually as behavior changes.
 
-**Formula** (`rag/ueba.py:76`):
+**Formula** (`identity_store/ueba.py:76`):
 ```
 baseline_new = (1 - α) × baseline_old + α × recent_count
 ```

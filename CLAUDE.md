@@ -67,7 +67,7 @@ Footer: BREAKING CHANGE: description, or Closes #123
 
 **Types**: `feat` | `fix` | `perf` | `security` | `chore` | `docs` | `test` | `refactor` | `ci` | `revert`
 
-**Scopes**: `wazuh` | `rabbitmq` | `middleware` | `slm` | `llm` | `rag` | `soar` | `monitoring` | `vault` | `docker` | `ci` | `docs` | `security`
+**Scopes**: `wazuh` | `rabbitmq` | `middleware` | `slm` | `llm` | `identity-store` | `soar` | `monitoring` | `vault` | `docker` | `ci` | `docs` | `security`
 
 **Valid examples**:
 ```
@@ -157,7 +157,7 @@ aegis/
 │       ├── middleware/         # Orchestration core
 │       ├── collectors/         # Wazuh / log ingest adapters
 │       ├── llm/                # Ollama interface (triage + reports)
-│       ├── rag/                # Identity store (PostgreSQL) + UEBA behavioral scoring
+│       ├── identity_store/     # Identity store (PostgreSQL) + UEBA behavioral scoring
 │       ├── soar/               # Shuffle SOAR playbook triggers
 │       ├── vault/              # HashiCorp Vault client
 │       └── monitoring/         # Prometheus metrics
