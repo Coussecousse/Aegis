@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from aegis.identity_store.postgres_client import PostgresIdentityStore
 from aegis.middleware.models import RagContext
-from aegis.rag.postgres_client import PostgresIdentityStore
 
 
 def test_postgres_identity_store_init_stores_parameters() -> None:

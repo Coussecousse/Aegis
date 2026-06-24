@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-import aegis.rag.client as rag_client_module
+import aegis.identity_store.client as rag_client_module
+from aegis.identity_store.client import ChromaDBClient
 from aegis.middleware.models import RagContext, UEBAMetrics
-from aegis.rag.client import ChromaDBClient
 
 pytestmark = pytest.mark.benchmark
 

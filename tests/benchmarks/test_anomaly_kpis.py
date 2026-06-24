@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from aegis.rag import ueba
+from aegis.identity_store import ueba
 
 pytestmark = pytest.mark.benchmark
 

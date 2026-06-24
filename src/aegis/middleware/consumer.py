@@ -17,6 +17,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from aegis.config import Settings
+from aegis.identity_store.postgres_client import PostgresIdentityStore
 from aegis.llm.client import OllamaClient
 from aegis.middleware.message_consumer import (
     MessageConsumer,
@@ -26,7 +27,6 @@ from aegis.middleware.message_consumer import (
 from aegis.middleware.models import WazuhLog
 from aegis.middleware.pipeline import triage_log
 from aegis.monitoring.metrics import MetricsCollector
-from aegis.rag.postgres_client import PostgresIdentityStore
 
 logger = logging.getLogger(__name__)
 

@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
+from aegis.identity_store.client import ChromaDBClient
+from aegis.identity_store.postgres_client import PostgresIdentityStore
 from aegis.llm.client import OllamaClient
 from aegis.middleware.models import (
     AegisReport,
@@ -47,8 +49,6 @@ from aegis.middleware.prompt_builder import (
 )
 from aegis.middleware.risk_scorer import compute_risk_score
 from aegis.monitoring.metrics import MetricsCollector
-from aegis.rag.client import ChromaDBClient
-from aegis.rag.postgres_client import PostgresIdentityStore
 from aegis.soar.client import ShuffleClient
 from aegis.soar.response_policy import ResponsePolicy, render_action
 
@@ -72,12 +72,12 @@ async def triage_log(
     fp_gate_confidence_ceiling: float = 0.6,
 ) -> EscalatedAlert | None:
     """
-    Run the fast triage stage of the AEGIS pipeline (SLM + RAG + gates).
+    Run the fast triage stage of the AEGIS pipeline (SLM + identity store + gates).
 
     Triage steps (strict order):
     1. SLM: Quick suspicion scoring (Qwen 2.5 1.5B)
     2. Gate: If not suspect or low confidence → discard, return None
-    3. RAG: Fetch asset context + UEBA from PostgreSQL
+    3. Identity store: Fetch asset context + UEBA from PostgreSQL
     4. Gate: UEBA false-positive filter → discard, return None
 
     Logs that pass both gates are bundled into an EscalatedAlert for the
@@ -210,14 +210,14 @@ async def triage_log(
     )
 
     # ========================================================================
-    # STEP 3: RAG - Fetch asset context + UEBA
+    # STEP 3: Identity store - Fetch asset context + UEBA
     # ========================================================================
-    rag_stage_start = time.perf_counter()
+    identity_stage_start = time.perf_counter()
     try:
         logger.debug(
             json.dumps(
                 {
-                    "event": "rag_start",
+                    "event": "identity_lookup_start",
                     "asset_identifier": log.source_ip,
                 }
             )
@@ -227,25 +227,27 @@ async def triage_log(
         # each alert is one activity event, scored against the asset's own baseline.
         # Use the alert's own timestamp (when the activity happened) rather than the
         # triage time, so a real burst is not flattened by serial processing lag.
-        rag = await chromadb_client.record_activity(log.source_ip, now=log.timestamp.timestamp())
+        identity_ctx = await chromadb_client.record_activity(
+            log.source_ip, now=log.timestamp.timestamp()
+        )
 
         logger.info(
             json.dumps(
                 {
-                    "event": "rag_complete",
-                    "asset_name": rag.asset_name,
-                    "asset_criticality": rag.asset_criticality,
-                    "ueba_anomaly_score": rag.ueba.anomaly_score,
+                    "event": "identity_lookup_complete",
+                    "asset_name": identity_ctx.asset_name,
+                    "asset_criticality": identity_ctx.asset_criticality,
+                    "ueba_anomaly_score": identity_ctx.ueba.anomaly_score,
                 }
             )
         )
 
         if metrics is not None:
-            metrics.record_rag(time.perf_counter() - rag_stage_start)
+            metrics.record_rag(time.perf_counter() - identity_stage_start)
 
     except Exception as e:
         if metrics is not None:
-            metrics.record_rag(time.perf_counter() - rag_stage_start)
+            metrics.record_rag(time.perf_counter() - identity_stage_start)
             metrics.record_triage(time.perf_counter() - total_perf_start)
             metrics.record_alert(
                 status="error",
@@ -255,7 +257,7 @@ async def triage_log(
         logger.error(
             json.dumps(
                 {
-                    "event": "rag_error",
+                    "event": "identity_lookup_error",
                     "error": str(e),
                     "asset": log.source_ip,
                 }
@@ -267,7 +269,7 @@ async def triage_log(
     # so its UEBA context is populated for next time. Self-limiting — once synced,
     # has_baseline becomes True and this stops firing. Failures here must not drop
     # the alert, so the publisher swallows its own errors.
-    if not rag.ueba.has_baseline and on_unprofiled_asset is not None:
+    if not identity_ctx.ueba.has_baseline and on_unprofiled_asset is not None:
         await on_unprofiled_asset(log.source_ip)
 
     # ========================================================================
@@ -282,10 +284,10 @@ async def triage_log(
     # anomaly_score=0.0 means "unknown", not "normal", so the gate fails open.
     # ========================================================================
     if (
-        rag.ueba.has_baseline
-        and rag.ueba.anomaly_score < 0.15
+        identity_ctx.ueba.has_baseline
+        and identity_ctx.ueba.anomaly_score < 0.15
         and log.rule_level <= 8
-        and rag.asset_criticality != "tier0"
+        and identity_ctx.asset_criticality != "tier0"
         and slm.confidence < fp_gate_confidence_ceiling
     ):
         if metrics is not None:
@@ -300,9 +302,9 @@ async def triage_log(
                 {
                     "event": "alert_discarded",
                     "reason": "ueba_fp_gate",
-                    "ueba_anomaly_score": rag.ueba.anomaly_score,
+                    "ueba_anomaly_score": identity_ctx.ueba.anomaly_score,
                     "rule_level": log.rule_level,
-                    "asset_criticality": rag.asset_criticality,
+                    "asset_criticality": identity_ctx.asset_criticality,
                     "slm_confidence": slm.confidence,
                 }
             )
@@ -319,7 +321,7 @@ async def triage_log(
                 "alert_id": str(log.id),
                 "report_id": str(report_id),
                 "confidence": slm.confidence,
-                "asset_criticality": rag.asset_criticality,
+                "asset_criticality": identity_ctx.asset_criticality,
             }
         )
     )
@@ -330,7 +332,7 @@ async def triage_log(
         start_time=start_time,
         log=log,
         slm_analysis=slm,
-        rag_context=rag,
+        rag_context=identity_ctx,
     )
 
 
@@ -368,7 +370,7 @@ async def analyze_log(
     """
     log = escalated.log
     slm = escalated.slm_analysis
-    rag = escalated.rag_context
+    identity_ctx = escalated.rag_context
     report_id = escalated.report_id
     pipeline_start = escalated.pipeline_start
     start_time = escalated.start_time
@@ -389,7 +391,7 @@ async def analyze_log(
             )
         )
 
-        llm_prompt = build_llm_prompt(log, slm, rag)
+        llm_prompt = build_llm_prompt(log, slm, identity_ctx)
         llm_response_dict = await ollama_client.generate(
             model=llm_model,
             prompt=llm_prompt,
@@ -454,9 +456,9 @@ async def analyze_log(
             slm=slm,
             llm=llm,
             rule_level=log.rule_level,
-            asset_criticality=rag.asset_criticality,
-            ueba_anomaly_score=rag.ueba.anomaly_score,
-            has_baseline=rag.ueba.has_baseline,
+            asset_criticality=identity_ctx.asset_criticality,
+            ueba_anomaly_score=identity_ctx.ueba.anomaly_score,
+            has_baseline=identity_ctx.ueba.has_baseline,
         )
 
         logger.info(
@@ -586,11 +588,11 @@ async def analyze_log(
         report = AegisReport(
             alert_id=report_id,
             timestamp=pipeline_start,
-            pipeline_version="0.3.0",
+            pipeline_version="1.0.0",
             source_log=log,
             slm_analysis=slm,
             llm_analysis=llm,
-            rag_context=rag,
+            rag_context=identity_ctx,
             risk_score=risk_score,
             decision=decision,
             processing_time_ms=int((time.time() - start_time) * 1000),

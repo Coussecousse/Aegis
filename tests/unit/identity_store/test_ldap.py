@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from aegis.rag.ldap import LdapConfig, LdapConnector
+from aegis.identity_store.ldap import LdapConfig, LdapConnector
 
 
 class _FakeLdapAttribute:
@@ -64,7 +64,8 @@ async def test_fetch_identity_context_maps_tier0(monkeypatch: pytest.MonkeyPatch
     )
     connector = LdapConnector(config)
 
-    monkeypatch.setattr("aegis.rag.ldap.importlib.import_module", lambda _: _FakeLdapModule())
+    target = "aegis.identity_store.ldap.importlib.import_module"
+    monkeypatch.setattr(target, lambda _: _FakeLdapModule())
 
     context = await connector.fetch_identity_context("dc-01")
 
@@ -91,7 +92,7 @@ async def test_fetch_identity_context_timeout_raises_connection_error(
         _ = kwargs
         raise TimeoutError
 
-    monkeypatch.setattr("aegis.rag.ldap.asyncio.to_thread", _fake_to_thread)
+    monkeypatch.setattr("aegis.identity_store.ldap.asyncio.to_thread", _fake_to_thread)
 
     with pytest.raises(ConnectionError):
         await connector.fetch_identity_context("dc-01")
@@ -132,7 +133,8 @@ async def test_fetch_identity_context_tier0_custom_dn(monkeypatch: pytest.Monkey
     )
     connector = LdapConnector(config)
 
-    monkeypatch.setattr("aegis.rag.ldap.importlib.import_module", lambda _: _FakeModuleBuiltin())
+    target = "aegis.identity_store.ldap.importlib.import_module"
+    monkeypatch.setattr(target, lambda _: _FakeModuleBuiltin())
 
     context = await connector.fetch_identity_context("dc-01")
 
