@@ -13,13 +13,13 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from aegis.config import Settings
+from aegis.identity_store.ldap import LdapConfig, LdapConnector
+from aegis.identity_store.postgres_client import PostgresIdentityStore
 from aegis.middleware.message_consumer import (
     MessageConsumer,
     Publisher,
     UnprocessableMessageError,
 )
-from aegis.rag.ldap import LdapConfig, LdapConnector
-from aegis.rag.postgres_client import PostgresIdentityStore
 
 logger = logging.getLogger(__name__)
 

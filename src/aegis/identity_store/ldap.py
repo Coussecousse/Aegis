@@ -8,8 +8,8 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
+from aegis.identity_store.base import BaseIdentityConnector
 from aegis.middleware.models import RagContext, UEBAMetrics
-from aegis.rag.base import BaseIdentityConnector
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ class LdapConnector(BaseIdentityConnector):
                 # Privilege is carried by asset_criticality (tier) + the risk scorer's
                 # criticality multiplier — NOT by anomaly_score. anomaly_score is a
                 # purely behavioral signal that accrues from observed activity
-                # (see aegis.rag.ueba / PostgresIdentityStore.record_activity), so a freshly
+                # (see identity_store.ueba / PostgresIdentityStore.record_activity), so a freshly
                 # synced asset starts at 0.0 until its behavior says otherwise.
                 anomaly_score=0.0,
             ),

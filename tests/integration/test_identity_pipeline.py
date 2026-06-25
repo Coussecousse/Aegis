@@ -8,10 +8,10 @@ from uuid import uuid4
 
 import pytest
 
+from aegis.identity_store.ldap import LdapConfig
 from aegis.middleware.consumer_identity import IdentityProcessor
 from aegis.middleware.models import RagContext, UEBAMetrics, WazuhLog
 from aegis.middleware.pipeline import analyze_log, triage_log
-from aegis.rag.ldap import LdapConfig
 
 
 class _FakeIdentityConnector:

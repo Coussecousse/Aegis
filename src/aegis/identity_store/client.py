@@ -10,9 +10,9 @@ from typing import Any, Literal, cast
 
 import httpx
 
+from aegis.identity_store import ueba
+from aegis.identity_store.base import BaseIdentityConnector
 from aegis.middleware.models import RagContext, UEBAMetrics
-from aegis.rag import ueba
-from aegis.rag.base import BaseIdentityConnector
 
 logger = logging.getLogger(__name__)
 

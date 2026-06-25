@@ -25,11 +25,11 @@ layer see [ueba.md](ueba.md).
 | `middleware/prompt_builder.py` | Builds the SLM and LLM prompts (data-only; role/schema live in the Modelfiles). |
 | `middleware/risk_scorer.py` | Composite `danger_score` (SLM/LLM/rule weights × criticality multiplier × UEBA factor) + uncertainty. |
 | `middleware/models.py` | Pydantic models: `WazuhLog`, `SlmResponse`, `LlmResponse`, `RagContext`, `UEBAMetrics`, `RiskScore`, `Decision`, `AegisReport`, `EscalatedAlert`. |
-| `rag/postgres_client.py` | PostgreSQL identity store: asset context lookup, identity sync, and **behavioral** `record_activity`. |
-| `rag/client.py` | Legacy ChromaDB client (deprecated, replaced by `postgres_client.py` in v1.0). |
-| `rag/ueba.py` | Pure behavioral scoring (sliding window + EWMA baseline) — the Gap 2 anomaly engine. |
-| `rag/ldap.py` | `LdapConnector` (AD-aware) implementing the `BaseIdentityConnector` seam. |
-| `rag/base.py` | `BaseIdentityConnector` — the pluggable identity-store seam (LDAP today, AD/Okta tomorrow). |
+| `identity_store/postgres_client.py` | PostgreSQL identity store: asset context lookup, identity sync, and **behavioral** `record_activity`. |
+| `identity_store/client.py` | Legacy ChromaDB client (deprecated, replaced by `postgres_client.py` in v1.0). |
+| `identity_store/ueba.py` | Pure behavioral scoring (sliding window + EWMA baseline) — the Gap 2 anomaly engine. |
+| `identity_store/ldap.py` | `LdapConnector` (AD-aware) implementing the `BaseIdentityConnector` seam. |
+| `identity_store/base.py` | `BaseIdentityConnector` — the pluggable identity-store seam (LDAP today, AD/Okta tomorrow). |
 | `soar/client.py` | Shuffle webhook client (async, retry). |
 | `vault/client.py`, `vault/loader.py` | HashiCorp Vault KV v2 client + startup secret loader. |
 | `monitoring/metrics.py` | Prometheus counters/histograms/gauges. |

@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
+from aegis.identity_store import client as rag_client_module
+from aegis.identity_store.base import BaseIdentityConnector
+from aegis.identity_store.client import ChromaDBClient
 from aegis.middleware.models import RagContext, UEBAMetrics
-from aegis.rag import client as rag_client_module
-from aegis.rag.base import BaseIdentityConnector
-from aegis.rag.client import ChromaDBClient
 
 from ._kpi_harness import load_corpus, run_canonical
 

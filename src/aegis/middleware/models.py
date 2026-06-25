@@ -406,7 +406,7 @@ class AegisReport(BaseModel):
 
     alert_id: UUID = Field(..., description="Unique alert report UUID")
     timestamp: datetime = Field(..., description="Report timestamp (ISO 8601)")
-    pipeline_version: str = Field(default="0.3.0", description="AEGIS pipeline version")
+    pipeline_version: str = Field(default="1.0.0", description="AEGIS pipeline version")
     source_log: WazuhLog = Field(..., description="Complete original Wazuh log")
     slm_analysis: SlmResponse = Field(..., description="SLM response")
     llm_analysis: LlmResponse | None = Field(
@@ -424,7 +424,7 @@ class AegisReport(BaseModel):
             "example": {
                 "alert_id": "550e8400-e29b-41d4-a716-446655440000",
                 "timestamp": "2026-05-19T14:35:42Z",
-                "pipeline_version": "0.3.0",
+                "pipeline_version": "1.0.0",
                 "source_log": {
                     "id": "550e8400-e29b-41d4-a716-446655440001",
                     "timestamp": "2026-05-19T14:32:15Z",

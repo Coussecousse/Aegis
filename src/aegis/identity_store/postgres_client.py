@@ -13,9 +13,9 @@ from typing import Any, Literal, cast
 
 import asyncpg
 
+from aegis.identity_store import ueba
+from aegis.identity_store.base import BaseIdentityConnector
 from aegis.middleware.models import RagContext, UEBAMetrics
-from aegis.rag import ueba
-from aegis.rag.base import BaseIdentityConnector
 
 logger = logging.getLogger(__name__)
 
@@ -105,19 +105,32 @@ class PostgresIdentityStore:
                 asset_identifier, row["baseline_rate"]
             )
 
+            associated_users_raw = row["associated_users"]
+            recent_anomalies_raw = row["recent_anomalies"]
+            associated_users = (
+                json.loads(associated_users_raw)
+                if isinstance(associated_users_raw, str)
+                else associated_users_raw or []
+            )
+            recent_anomalies = (
+                json.loads(recent_anomalies_raw)
+                if isinstance(recent_anomalies_raw, str)
+                else recent_anomalies_raw or []
+            )
+
             return RagContext(
                 asset_name=row["asset_name"],
                 asset_criticality=cast(
                     Literal["tier0", "tier1", "tier2"], row["asset_criticality"]
                 ),
                 asset_description=row["asset_description"] or "",
-                similar_incidents=[],  # Never implemented in prod (ChromaDB legacy)
+                similar_incidents=[],
                 ueba=UEBAMetrics(
                     has_baseline=row["has_baseline"],
                     baseline_description=row["baseline_description"],
-                    associated_users=row["associated_users"],
+                    associated_users=associated_users,
                     normal_activity_window=row["normal_activity_window"],
-                    recent_anomalies=row["recent_anomalies"],
+                    recent_anomalies=recent_anomalies,
                     anomaly_score=anomaly_score,
                 ),
             )
